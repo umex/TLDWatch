@@ -6,7 +6,7 @@ A local-first web app that turns any video (local file, YouTube URL, or YouTube 
 
 ## Phases
 
-- [ ] **Phase 1: Back-end Skeleton + Storage + Data Layout** - FastAPI service, SQLite WAL, per-job filesystem layout, Pydantic schema, OpenAPI surface; the foundation every other component imports.
+- [x] **Phase 1: Back-end Skeleton + Storage + Data Layout** - FastAPI service, SQLite WAL, per-job filesystem layout, Pydantic schema, OpenAPI surface; the foundation every other component imports. (completed 2026-06-14)
 - [ ] **Phase 2: GPU Backend Detection + Model Manager** - First-run CUDA/ROCm/CPU detection, model download with SHA verification, lazy load + idle unload, single-model VRAM discipline.
 - [ ] **Phase 3: STT Adapter + Audio Chunker + Standalone CLI** - faster-whisper adapter, long-audio chunker with OOM fallback, language auto-detect, a runnable CLI that proves the GPU abstraction end-to-end.
 - [ ] **Phase 4: Job Orchestrator + Persistent Queue + WebSocket Progress** - In-process job runner, SQLite-backed queue with restart persistence, state machine with file-as-truth, real-time progress broadcast.
@@ -45,7 +45,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-03: Per-job filesystem layout + file-as-truth conventions
+- [x] 01-03: Per-job filesystem layout + file-as-truth conventions
 
 ### Phase 2: GPU Backend Detection + Model Manager
 
@@ -252,7 +252,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Back-end Skeleton + Storage + Data Layout | 2/3 | In Progress|  |
+| 1. Back-end Skeleton + Storage + Data Layout | 3/3 | Complete   | 2026-06-14 |
 | 2. GPU Backend Detection + Model Manager | 0/3 | Not started | - |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 0/3 | Not started | - |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 0/3 | Not started | - |

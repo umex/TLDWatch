@@ -12,3 +12,4 @@ data/jobs/*/
 data/settings.json
 .env
 *.tmp_*
+.claude/worktrees/
