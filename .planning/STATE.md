@@ -91,6 +91,42 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-14T20:30:00.000Z
-Stopped at: Phase 1 housekeeping complete (tracking committed at 314b742, stash dropped, .claude/ gitignored, config intent preserved at 024bea1); ready for /gsd-verify-phase 1
-Resume file: .planning/HANDOFF.json (consumed; tasks 1-3, 5, 6 done; tasks 4, 7, 8 remaining)
+Last session: 2026-06-14T23:20:00.000Z
+Stopped at: Codex implementation review committed at 0637cd1. 5 HIGH + 3 MEDIUM findings flagged. User chose to plan a fix wave before Phase 2. Context hit 67% mid-planning; need fresh session to draft 01-04-PLAN.md (gap-closure).
+Resume file: .planning/phases/01-back-end-skeleton-storage-data-layout/01-IMPLEMENTATION-REVIEW.md (the source-of-truth gap list)
+
+### Open review-driven follow-ups (to plan as 01-04 in a fresh session)
+
+**HIGH (3 real bugs + 1 documented deferral):**
+- H1: Restart-only settings semantics — defer `_State.settings = new` in `app/settings/service.py:114` until restart. Save the patch to a "pending" slot; return it on the response header. Restart picks it up.
+- H2: Correct `POST /jobs` OpenAPI response — move the `JobManifest` registration out of `responses=` into the `app.openapi` patch (where `Transcript`/`Summary` already get registered). Make the operation response honest.
+- H3: Project `status` to DB on every stage transition — `update_stage` at `app/jobs/manifest.py:133` needs a `status` column UPDATE. Status mapping table: `current_stage in {None, "ingested"} -> "queued"`, `"transcribed" -> "transcribing"`, etc.
+- H4 (real): Manifest patches (language, duration, summary_kinds) are never projected to SQLite. Extend `update_stage` SQL to UPDATE these columns too. Extend `reconcile.py` SQL to project them on boot.
+- H5 (deferred to Phase 4 per 01-01 SUMMARY): `create_job` orphan-row compensation. Document the decision to defer or implement minimal compensation (delete the row on manifest-write failure).
+
+**MEDIUM:**
+- M1: Validate stage files against Pydantic models in `app/jobs/resume.py:72` (use `JobManifest` + per-stage Pydantic models from `app.models`).
+- M2: Reject zero-byte `source.*` files in `app/jobs/resume.py:116`.
+- M3: Status-aware stale check in `app/jobs/cleanup.py:114` (skip `done`/`failed`/`cancelled`).
+
+**LOW (skip for now):**
+- Blocking fs in async paths (Phase 4 will replace `/stage` route with worker-bound call)
+- Semantic constraints on timestamps (Phase 2+ — needs domain decisions)
+- `pydantic.ValidationError` import in routes_jobs.py (mild; pragmatic)
+
+### Test additions to plan
+- Direct WAL test (open 2 connections, assert journal_mode=wal on both)
+- Migration triple-apply idempotency
+- `data_dir` PATCH restart-only: PATCH does not change `_State.settings`; verify by reading after PATCH
+- `data_dir: null` / empty / relative / file-path rejection
+- OpenAPI: assert the 201 operation response schema is `JobResponse`, not `JobManifest`
+- Stage-to-status transitions: enumerated matrix
+- Manifest patch projection: PATCH `language="en"`, then `GET /jobs/{id}` returns `language="en"`
+- Resume on `{}` / corrupt / zero-byte files
+- Stale check on `done` / `failed` / `cancelled` rows is a no-op
+
+### Next command when resuming
+```
+/gsd-plan-phase 1 --gaps
+```
+The `--gaps` mode reads `01-IMPLEMENTATION-REVIEW.md` and produces 01-04-PLAN.md (gap-closure wave) to be executed before Phase 2 planning.
