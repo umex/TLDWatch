@@ -13,7 +13,9 @@ Ordering rules (Codex HIGH #8 / D-13):
 - ``mark_stale`` is a soft-failure: a 0-second threshold marks
   every touched job as failed with ``error="stalled"``; a huge
   threshold is a no-op. Used by ``POST /jobs/{id}/stale-check``
-  for admin / test flows.
+  for admin / test flows. Plan 01-04 M3: a status-aware gate
+  short-circuits BEFORE the mtime check so a completed job
+  (``done`` / ``failed`` / ``cancelled``) is never marked stale.
 """
 
 from __future__ import annotations
@@ -32,6 +34,10 @@ from app.storage.retry import retry_windows
 from app.util.time import utcnow_iso
 
 _log = logging.getLogger(__name__)
+
+# Plan 01-04 M3: a job in any of these statuses is "completed" and
+# must NOT be marked stale by ``mark_stale`` regardless of mtime.
+_TERMINAL_STATUSES: frozenset[str] = frozenset({"done", "failed", "cancelled"})
 
 
 async def cancel_job(session: AsyncSession, settings: Settings, job_id: str) -> bool:
@@ -123,7 +129,25 @@ async def mark_stale(
 
     - ``stale`` is the result of :func:`is_stale`.
     - ``marked`` is True iff the row was actually updated.
+
+    Plan 01-04 M3: BEFORE the mtime check, a single SELECT reads
+    the row's ``status``. If the row is missing, or the status is
+    in :data:`_TERMINAL_STATUSES` (``done`` / ``failed`` /
+    ``cancelled``), the function returns ``(False, False)``
+    without touching the DB or the filesystem.
     """
+    # M3: status-aware gate. A completed job is NEVER stale,
+    # regardless of threshold or mtime.
+    result = await session.execute(
+        text("SELECT status FROM jobs WHERE id = :id"),
+        {"id": job_id},
+    )
+    row = result.fetchone()
+    if row is None:
+        return False, False
+    if row[0] in _TERMINAL_STATUSES:
+        return False, False
+
     stale = is_stale(settings, job_id, threshold_s=threshold_s)
     if not stale:
         return False, False
