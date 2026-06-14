@@ -45,14 +45,6 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
     "",
     response_model=JobResponse,
     status_code=status.HTTP_201_CREATED,
-    responses={
-        201: {
-            "description": "Job created. The on-disk manifest is the rich "
-            "snapshot of the new job; the API response carries the "
-            "summary fields only.",
-            "model": JobManifest,
-        }
-    },
 )
 async def post_job(
     payload: CreateJobRequest,

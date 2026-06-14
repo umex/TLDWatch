@@ -141,11 +141,13 @@ app = FastAPI(title="TranscriptionAndNotes", version="0.1.0", lifespan=lifespan)
 # (StageUpdateRequest, StaleCheckResponse, ManifestPatch) so the
 # OpenAPI schema carries the full per-job control surface.
 from app.models.job import ManifestPatch, StageUpdateRequest, StaleCheckResponse
+from app.models.manifest import JobManifest
 
 _EXTRA_OPENAPI_MODELS = [
     TranscriptSegment,
     Transcript,
     Summary,
+    JobManifest,
     ManifestPatch,
     StageUpdateRequest,
     StaleCheckResponse,
