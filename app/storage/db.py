@@ -92,7 +92,18 @@ def _migrations_dir() -> Path:
 
 
 async def apply_migrations(engine: AsyncEngine) -> None:
-    """Apply any unapplied ``migrations/*.sql`` files in filename order."""
+    """Apply any unapplied ``migrations/*.sql`` files in filename order.
+
+    Each migration is split on ``;`` and its statements are executed
+    individually. ``ALTER TABLE ... ADD COLUMN`` is the common
+    per-statement case (one column per file, from migration 0002
+    onward): if the column already exists SQLite raises an
+    ``OperationalError`` whose message contains ``"duplicate column
+    name"``. The runner treats that specific error as a no-op
+    (skipping the statement, NOT aborting the migration) and
+    continues to the next statement - making partial application
+    safe (Codex HIGH: per-statement guards).
+    """
     migrations_dir = _migrations_dir()
     if not migrations_dir.is_dir():
         raise FileNotFoundError(f"migrations directory not found: {migrations_dir}")
@@ -131,11 +142,27 @@ async def apply_migrations(engine: AsyncEngine) -> None:
             # constraint. Split the file into individual statements on
             # semicolons (a robust-enough split for our DDL-only files
             # which do not embed semicolons inside string literals).
+            #
+            # Per-statement guard: a duplicate-column error from an
+            # ``ALTER TABLE ADD COLUMN`` is treated as a no-op (the
+            # column was added in a prior partial run that did not
+            # record the version row). Any other error re-raises so
+            # the migration aborts and the server refuses to start.
             raw = sql_file.read_text(encoding="utf-8")
             for stmt in _split_sql_statements(raw):
                 if not stmt:
                     continue
-                await conn.execute(sa.text(stmt))
+                try:
+                    await conn.execute(sa.text(stmt))
+                except sa.exc.OperationalError as exc:
+                    if "duplicate column" in str(exc).lower():
+                        logger.info(
+                            "skipping already-applied column in %s: %s",
+                            sql_file.name,
+                            exc,
+                        )
+                        continue
+                    raise
             applied_at = datetime.now(timezone.utc).isoformat()
             await conn.execute(
                 sa.text(
