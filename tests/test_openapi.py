@@ -74,3 +74,25 @@ async def test_openapi_internal_control_schemas(client: httpx.AsyncClient) -> No
         assert protected not in patch_props, (
             f"protected field {protected!r} leaked into ManifestPatch"
         )
+
+
+# --- Plan 01-04 H2: POST /jobs 201 references JobResponse ------------------
+
+
+@pytest.mark.asyncio
+async def test_openapi_post_jobs_201_references_job_response(
+    client: httpx.AsyncClient,
+) -> None:
+    """The POST /jobs 201 schema references ``JobResponse`` (not
+    ``JobManifest``). ``JobManifest`` is still in ``components.schemas``
+    (via ``_EXTRA_OPENAPI_MODELS``)."""
+    import json as _json
+
+    resp = await client.get("/openapi.json")
+    data = resp.json()
+    s201 = (
+        data["paths"]["/jobs"]["post"]["responses"]["201"]
+        ["content"]["application/json"]["schema"]
+    )
+    assert "JobResponse" in _json.dumps(s201), s201
+    assert "JobManifest" in data.get("components", {}).get("schemas", {})

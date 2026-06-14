@@ -168,3 +168,42 @@ async def test_update_stage_protected_fields_not_in_model() -> None:
     assert fields.isdisjoint(protected), (
         f"protected fields leaked into ManifestPatch: {fields & protected}"
     )
+
+
+# --- Plan 01-04 H4: stage update projects manifest metadata to DB ----------
+
+
+@pytest.mark.asyncio
+async def test_update_stage_projects_metadata_to_db(
+    client: httpx.AsyncClient,
+) -> None:
+    """A stage update with a manifest_patch projects language, duration_s,
+    summary_kinds to the DB row, and GET /jobs/{id} reflects them."""
+    resp = await client.post("/jobs", json={})
+    job_id = resp.json()["id"]
+
+    resp = await client.post(
+        f"/jobs/{job_id}/stage",
+        json={
+            "stage": "transcribed",
+            "manifest_patch": {
+                "language": "en",
+                "duration_s": 42.5,
+                "summary_kinds": ["meeting"],
+            },
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["language"] == "en"
+    assert body["duration_s"] == 42.5
+    assert body["summary_kinds"] == ["meeting"]
+
+    # GET /jobs/{id} reflects the same fields.
+    resp = await client.get(f"/jobs/{job_id}")
+    assert resp.status_code == 200, resp.text
+    fetched = resp.json()
+    assert fetched["language"] == "en"
+    assert fetched["duration_s"] == 42.5
+    assert fetched["summary_kinds"] == ["meeting"]
+    assert fetched["current_stage"] == "transcribed"

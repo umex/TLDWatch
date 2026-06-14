@@ -258,3 +258,110 @@ async def _read_or_dump(s: Settings, j: str) -> JobManifest:
     from app.jobs.manifest import read_manifest
 
     return await read_manifest(s, j)
+
+
+# --- Plan 01-04 T6+M2: invalid / zero-byte stage file rejection -----------
+
+
+@pytest.mark.asyncio
+async def test_transcript_file_missing_required_fields(tmp_data_dir: Path) -> None:
+    """M1: transcript.json with ``{}`` (missing required ``job_id``) is
+    rejected by ``parse_stage_file`` (Transcript.model_validate_json
+    raises). The resume rule treats the stage as incomplete and
+    walks back to 'transcribed'."""
+    s = _settings(tmp_data_dir)
+    j = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    await ensure_job_dir(s, j)
+    from app.jobs.manifest import empty_manifest, write_manifest
+
+    m = empty_manifest(j)
+    m = m.model_copy(update={"diarization_enabled": False, "summary_kinds": []})
+    await write_manifest(s, m)
+    source_path(s, j, "mp4").write_bytes(b"\x00" * 16)
+    transcript_path(s, j).write_text(json.dumps({}), encoding="utf-8")
+    manifest = await _read_or_dump(s, j)
+    # ingested complete; transcribed fails (empty dict fails Transcript validation)
+    assert infer_resume_point(s, j, manifest) == "transcribed"
+
+
+@pytest.mark.asyncio
+async def test_transcript_file_invalid_json(tmp_data_dir: Path) -> None:
+    """Corrupt JSON in transcript.json -> transcribed not complete."""
+    s = _settings(tmp_data_dir)
+    j = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    await ensure_job_dir(s, j)
+    from app.jobs.manifest import empty_manifest, write_manifest
+
+    m = empty_manifest(j)
+    m = m.model_copy(update={"diarization_enabled": False, "summary_kinds": []})
+    await write_manifest(s, m)
+    source_path(s, j, "mp4").write_bytes(b"\x00" * 16)
+    transcript_path(s, j).write_text("not json at all", encoding="utf-8")
+    manifest = await _read_or_dump(s, j)
+    assert infer_resume_point(s, j, manifest) == "transcribed"
+
+
+@pytest.mark.asyncio
+async def test_diarization_file_invalid_json(tmp_data_dir: Path) -> None:
+    """Corrupt JSON in diarization.json -> diarized not complete."""
+    from app.jobs.manifest import empty_manifest, write_manifest
+    from app.storage.fs import diarization_path
+
+    s = _settings(tmp_data_dir)
+    j = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    await ensure_job_dir(s, j)
+    m = empty_manifest(j)
+    m = m.model_copy(
+        update={"diarization_enabled": True, "summary_kinds": []}
+    )
+    await write_manifest(s, m)
+    source_path(s, j, "mp4").write_bytes(b"\x00" * 16)
+    transcript_path(s, j).write_text(
+        json.dumps({"job_id": j, "segments": []}), encoding="utf-8"
+    )
+    diarization_path(s, j).write_text("not json at all", encoding="utf-8")
+    manifest = await _read_or_dump(s, j)
+    # ingested + transcribed complete; diarized fails on parse -> resume at 'diarized'
+    assert infer_resume_point(s, j, manifest) == "diarized"
+
+
+@pytest.mark.asyncio
+async def test_summary_file_invalid_json(tmp_data_dir: Path) -> None:
+    """Corrupt JSON in summary-<kind>.json -> summarized not complete."""
+    from app.jobs.manifest import empty_manifest, write_manifest
+
+    s = _settings(tmp_data_dir)
+    j = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    await ensure_job_dir(s, j)
+    m = empty_manifest(j)
+    m = m.model_copy(
+        update={"diarization_enabled": False, "summary_kinds": ["meeting"]}
+    )
+    await write_manifest(s, m)
+    source_path(s, j, "mp4").write_bytes(b"\x00" * 16)
+    transcript_path(s, j).write_text(
+        json.dumps({"job_id": j, "segments": []}), encoding="utf-8"
+    )
+    summary_path(s, j, "meeting").write_text("not json at all", encoding="utf-8")
+    manifest = await _read_or_dump(s, j)
+    # ingested + transcribed complete; summarized fails on parse -> resume at 'summarized'
+    assert infer_resume_point(s, j, manifest) == "summarized"
+
+
+@pytest.mark.asyncio
+async def test_source_file_zero_bytes_rejected(tmp_data_dir: Path) -> None:
+    """M2: zero-byte source.* is rejected; the resume rule walks back to 'ingested'."""
+    from app.jobs.manifest import empty_manifest, write_manifest
+
+    s = _settings(tmp_data_dir)
+    j = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+    await ensure_job_dir(s, j)
+    m = empty_manifest(j)
+    m = m.model_copy(
+        update={"diarization_enabled": False, "summary_kinds": []}
+    )
+    await write_manifest(s, m)
+    source_path(s, j, "mp4").write_bytes(b"")
+    manifest = await _read_or_dump(s, j)
+    # ingested fails (zero-byte source) -> resume at 'ingested'
+    assert infer_resume_point(s, j, manifest) == "ingested"

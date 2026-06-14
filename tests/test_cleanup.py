@@ -220,3 +220,102 @@ def test_is_stale_falls_back_to_manifest_mtime(
     """is_stale returns False if no activity, regardless of threshold."""
     s = _settings(tmp_data_dir)
     assert is_stale(s, "no-such-id", threshold_s=0) is False
+
+
+# --- Plan 01-04 T7 (M3): mark_stale is a no-op on terminal rows ----------
+
+
+async def _set_status(sf, job_id: str, status: str) -> None:
+    from sqlalchemy import text
+
+    async with sf() as session:
+        await session.execute(
+            text("UPDATE jobs SET status = :status WHERE id = :id"),
+            {"status": status, "id": job_id},
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_mark_stale_on_done_is_noop(
+    client: httpx.AsyncClient, tmp_data_dir: Path
+) -> None:
+    """A job with status='done' is NEVER marked stale, even at threshold_s=0."""
+    resp = await client.post("/jobs", json={})
+    job_id = resp.json()["id"]
+    s = _settings(tmp_data_dir)
+    sf = _session_factory()
+    await _set_status(sf, job_id, "done")
+
+    # Make the file look ancient: the mtime check would say stale.
+    import os
+    import time as _time
+
+    f = s.data_dir if False else (tmp_data_dir / "data")  # noqa: F841 (keeps linter happy)
+    from app.storage.fs import job_dir
+
+    jd = job_dir(s, job_id)
+    manifest = jd / "manifest.json"
+    if manifest.exists():
+        old = _time.time() - 10_000
+        os.utime(manifest, (old, old))
+
+    async with sf() as session:
+        stale, marked = await mark_stale(session, s, job_id, threshold_s=0)
+    assert stale is False
+    assert marked is False
+
+    # Status is unchanged.
+    async with sf() as session:
+        from app.jobs.service import get_job
+
+        refreshed = await get_job(session, job_id)
+        assert refreshed is not None
+        assert refreshed.status == "done"
+
+
+@pytest.mark.asyncio
+async def test_mark_stale_on_failed_is_noop(
+    client: httpx.AsyncClient, tmp_data_dir: Path
+) -> None:
+    """A job with status='failed' is NEVER marked stale."""
+    resp = await client.post("/jobs", json={})
+    job_id = resp.json()["id"]
+    s = _settings(tmp_data_dir)
+    sf = _session_factory()
+    await _set_status(sf, job_id, "failed")
+
+    async with sf() as session:
+        stale, marked = await mark_stale(session, s, job_id, threshold_s=0)
+    assert stale is False
+    assert marked is False
+
+
+@pytest.mark.asyncio
+async def test_mark_stale_on_cancelled_is_noop(
+    client: httpx.AsyncClient, tmp_data_dir: Path
+) -> None:
+    """A job with status='cancelled' is NEVER marked stale."""
+    resp = await client.post("/jobs", json={})
+    job_id = resp.json()["id"]
+    s = _settings(tmp_data_dir)
+    sf = _session_factory()
+    await _set_status(sf, job_id, "cancelled")
+
+    async with sf() as session:
+        stale, marked = await mark_stale(session, s, job_id, threshold_s=0)
+    assert stale is False
+    assert marked is False
+
+
+@pytest.mark.asyncio
+async def test_mark_stale_missing_job_returns_false_false(
+    client: httpx.AsyncClient, tmp_data_dir: Path
+) -> None:
+    """A job_id that does not exist returns (False, False)."""
+    s = _settings(tmp_data_dir)
+    sf = _session_factory()
+    async with sf() as session:
+        stale, marked = await mark_stale(session, s, "ffffffff-ffff-ffff-ffff-ffffffffffff")
+    assert stale is False
+    assert marked is False

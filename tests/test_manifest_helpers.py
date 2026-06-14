@@ -136,3 +136,45 @@ async def test_update_stage_writes_manifest_first(
     assert on_disk["current_stage"] == "transcribed"
     assert on_disk["source_type"] == "local"
     assert on_disk["stage_timestamps"]["transcribed"] is not None
+
+
+@pytest.mark.asyncio
+async def test_update_stage_projects_status_and_metadata(
+    client: httpx.AsyncClient, tmp_data_dir: Path
+) -> None:
+    """Plan 01-04 H3+H4: update_stage projects ``status`` AND the
+    full metadata set (``language``, ``duration_s``, ``summary_kinds_json``)
+    in the same UPDATE."""
+    from app.api import dependencies as deps_module
+    from app.jobs.manifest import update_stage
+
+    resp = await client.post("/jobs", json={})
+    job_id = resp.json()["id"]
+    settings = Settings(data_dir=str(tmp_data_dir / "data"))
+    sf = deps_module.session_factory
+    assert sf is not None
+
+    async with sf() as session:
+        await update_stage(
+            settings,
+            session,
+            job_id,
+            "transcribed",
+            ManifestPatch(language="en", duration_s=12.5, summary_kinds=["meeting"]),
+        )
+
+    async with sf() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT status, language, duration_s, summary_kinds_json "
+                    "FROM jobs WHERE id = :id"
+                ),
+                {"id": job_id},
+            )
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "transcribing"
+    assert row[1] == "en"
+    assert row[2] == 12.5
+    assert json.loads(row[3]) == ["meeting"]

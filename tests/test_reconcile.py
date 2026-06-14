@@ -22,6 +22,7 @@ from app.api import dependencies as deps_module
 from app.jobs.manifest import empty_manifest, read_manifest, write_manifest
 from app.jobs.reconcile import reconcile_all
 from app.jobs.service import create_job
+from app.models.job import ManifestPatch
 from app.models.settings import Settings
 from app.storage.fs import ensure_job_dir, job_dir, manifest_path
 
@@ -142,3 +143,65 @@ async def test_reconcile_logs_missing_manifest(client, tmp_data_dir: Path) -> No
     assert "cccccccc-cccc-cccc-cccc-cccccccccccc" in summary["missing_manifests"]
     # Folder is still there.
     assert folder.is_dir()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_projects_full_state(
+    client: httpx.AsyncClient, tmp_data_dir: Path
+) -> None:
+    """Plan 01-04 H4 part 2: reconcile_all projects the full metadata
+    set (language, duration_s, summary_kinds) to a drifted row, not
+    only current_stage + stage_timestamps_json."""
+    from app.api import dependencies as deps_module
+    from app.jobs.manifest import update_stage
+
+    resp = await client.post("/jobs", json={})
+    job_id = resp.json()["id"]
+    s = _settings(tmp_data_dir)
+    sf = deps_module.session_factory
+    assert sf is not None
+
+    # Write a manifest with language + duration_s + summary_kinds.
+    async with sf() as session:
+        await update_stage(
+            s,
+            session,
+            job_id,
+            "transcribed",
+            ManifestPatch(language="en", duration_s=12.5, summary_kinds=["meeting"]),
+        )
+
+    # Manually clear the metadata columns in the DB to simulate drift.
+    from sqlalchemy import text
+
+    async with sf() as session:
+        await session.execute(
+            text(
+                "UPDATE jobs SET language = NULL, duration_s = NULL, "
+                "summary_kinds_json = NULL WHERE id = :id"
+            ),
+            {"id": job_id},
+        )
+        await session.commit()
+
+    # First reconcile: heals the initial drift. Second reconcile: no-op.
+    first = await reconcile_all(s, sf)
+    assert first["updated"] >= 1
+
+    async with sf() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT status, language, duration_s, summary_kinds_json "
+                    "FROM jobs WHERE id = :id"
+                ),
+                {"id": job_id},
+            )
+        ).fetchone()
+    assert row[0] == "transcribing"
+    assert row[1] == "en"
+    assert row[2] == 12.5
+    assert json.loads(row[3]) == ["meeting"]
+
+    second = await reconcile_all(s, sf)
+    assert second["updated"] == 0

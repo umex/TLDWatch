@@ -67,3 +67,35 @@ async def test_patch_settings_rejects_int(client: httpx.AsyncClient) -> None:
 async def test_patch_settings_rejects_unknown_field(client: httpx.AsyncClient) -> None:
     resp = await client.patch("/settings", json={"unknown_field": "x"})
     assert resp.status_code == 422
+
+
+# --- Plan 01-04 T8: data_dir validation (null/empty/relative/file) -------
+
+
+@pytest.mark.asyncio
+async def test_data_dir_null_returns_422(client: httpx.AsyncClient) -> None:
+    resp = await client.patch("/settings", json={"data_dir": None})
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_data_dir_empty_returns_422(client: httpx.AsyncClient) -> None:
+    resp = await client.patch("/settings", json={"data_dir": ""})
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_data_dir_relative_returns_422(client: httpx.AsyncClient) -> None:
+    resp = await client.patch("/settings", json={"data_dir": "relative/path"})
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_data_dir_file_path_returns_422(
+    client: httpx.AsyncClient, tmp_data_dir: Path
+) -> None:
+    """A path pointing at an existing regular file is rejected."""
+    f = tmp_data_dir / "f.txt"
+    f.write_text("x", encoding="utf-8")
+    resp = await client.patch("/settings", json={"data_dir": str(f)})
+    assert resp.status_code == 422, resp.text

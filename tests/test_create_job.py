@@ -62,3 +62,78 @@ async def test_post_jobs_manifest_is_valid_pydantic(
     assert m.job_id == job_id
     assert m.schema_version == 1
     assert m.status == "queued"
+
+
+# --- Plan 01-04 H5: create_job compensates DB row on folder/manifest fail -
+
+
+@pytest.mark.asyncio
+async def test_create_job_compensates_on_folder_failure(
+    client: httpx.AsyncClient,
+    tmp_data_dir: Path,
+) -> None:
+    """If ensure_job_dir raises, the DB row is DELETED before the
+    exception propagates (no orphan row)."""
+    import sqlite3 as _sqlite3
+    from unittest.mock import patch
+
+    from app.api import dependencies as deps_module
+    from app.jobs import service as jobs_service
+    from app.models.settings import Settings
+
+    settings = Settings(data_dir=str(tmp_data_dir / "data"))
+    sf = deps_module.session_factory
+    assert sf is not None
+
+    # Pre-count rows.
+    db_path = tmp_data_dir / "data" / "app.db"
+    con = _sqlite3.connect(db_path)
+    before = con.execute("SELECT count(*) FROM jobs").fetchone()[0]
+    con.close()
+
+    with patch.object(
+        jobs_service, "ensure_job_dir", side_effect=OSError(28, "no space")
+    ):
+        with pytest.raises(OSError):
+            async with sf() as session:
+                await jobs_service.create_job(session, settings)
+
+    con = _sqlite3.connect(db_path)
+    after = con.execute("SELECT count(*) FROM jobs").fetchone()[0]
+    con.close()
+    assert after == before, (before, after)
+
+
+@pytest.mark.asyncio
+async def test_create_job_compensates_on_manifest_failure(
+    client: httpx.AsyncClient,
+    tmp_data_dir: Path,
+) -> None:
+    """If write_manifest raises, the DB row is DELETED (no orphan)."""
+    import sqlite3 as _sqlite3
+    from unittest.mock import patch
+
+    from app.api import dependencies as deps_module
+    from app.jobs import service as jobs_service
+    from app.models.settings import Settings
+
+    settings = Settings(data_dir=str(tmp_data_dir / "data"))
+    sf = deps_module.session_factory
+    assert sf is not None
+
+    db_path = tmp_data_dir / "data" / "app.db"
+    con = _sqlite3.connect(db_path)
+    before = con.execute("SELECT count(*) FROM jobs").fetchone()[0]
+    con.close()
+
+    with patch.object(
+        jobs_service, "write_manifest", side_effect=OSError(28, "no space")
+    ):
+        with pytest.raises(OSError):
+            async with sf() as session:
+                await jobs_service.create_job(session, settings)
+
+    con = _sqlite3.connect(db_path)
+    after = con.execute("SELECT count(*) FROM jobs").fetchone()[0]
+    con.close()
+    assert after == before, (before, after)
