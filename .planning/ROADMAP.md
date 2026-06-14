@@ -41,7 +41,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02: SQLite WAL + schema migrations + Pydantic models
+- [x] 01-02: SQLite WAL + schema migrations + Pydantic models
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -252,7 +252,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Back-end Skeleton + Storage + Data Layout | 1/3 | In Progress|  |
+| 1. Back-end Skeleton + Storage + Data Layout | 2/3 | In Progress|  |
 | 2. GPU Backend Detection + Model Manager | 0/3 | Not started | - |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 0/3 | Not started | - |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 0/3 | Not started | - |
