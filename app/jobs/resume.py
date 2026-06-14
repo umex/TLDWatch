@@ -22,6 +22,15 @@ Special cases:
   (b) ``manifest.current_stage == "done"``. The resume rule's
   ``None`` return means "all applicable stages complete - nothing
   to resume".
+
+Plan 01-04 M1+M2:
+
+- :func:`parse_stage_file` accepts a ``model_cls`` keyword argument;
+  when provided, the file is validated against the Pydantic model and
+  a :class:`ValidationError` makes the function return False (the
+  resume rule then re-runs the stage).
+- Zero-byte ``source.*`` files are rejected by the same size check
+  the JSON branch already applied.
 """
 
 from __future__ import annotations
@@ -30,8 +39,13 @@ import json
 from pathlib import Path
 from typing import Literal
 
+from pydantic import BaseModel, ValidationError
+
+from app.models.diarization import Diarization
 from app.models.manifest import JobManifest
 from app.models.settings import Settings
+from app.models.summary import Summary
+from app.models.transcript import Transcript
 from app.storage.fs import (
     diarization_path,
     job_dir,
@@ -69,12 +83,22 @@ def is_stage_applicable(stage: StageName, manifest: JobManifest) -> bool:
     return True
 
 
-def parse_stage_file(path: Path) -> bool:
-    """Return True iff ``path`` exists, is non-empty, and parses as JSON.
+def parse_stage_file(
+    path: Path, *, model_cls: type[BaseModel] | None = None
+) -> bool:
+    """Return True iff ``path`` exists, is non-empty, and parses correctly.
 
-    For ``source.*`` files a JSON parse is not appropriate; the function
-    always returns True when the file exists and is non-empty regardless
-    of content. Used by D-12 to mark unparseable files for re-run.
+    Plan 01-04 M1+M2:
+
+    - Zero-byte files are rejected (size check is at the top, so both
+      the JSON branch AND the ``source.*`` branch apply it).
+    - ``source.*`` files are media; existence + non-empty is enough.
+    - When ``model_cls`` is provided, the file's JSON is validated via
+      ``model_cls.model_validate_json``; a :class:`ValidationError`
+      (or any :class:`ValueError` from JSON parsing) makes the
+      function return False so the resume rule re-runs the stage.
+    - When ``model_cls`` is None and the path is a JSON stage file,
+      a plain JSON parse is enough (backward-compatible fallback).
     """
     if not path.exists():
         return False
@@ -83,15 +107,29 @@ def parse_stage_file(path: Path) -> bool:
             return False
     except OSError:
         return False
-    # ``source.*`` files are media; we only check existence + non-empty.
+    # ``source.*`` files are media; existence + non-empty is sufficient.
     if path.name.startswith("source."):
         return True
     try:
-        with path.open("r", encoding="utf-8") as fh:
-            json.load(fh)
-        return True
-    except (OSError, ValueError):
+        content = path.read_text(encoding="utf-8")
+    except OSError:
         return False
+    if model_cls is not None:
+        # Strict path: validate against the typed model. A
+        # ValidationError (missing required fields, wrong types) makes
+        # the file "not a complete stage output" so the resume rule
+        # re-runs the stage.
+        try:
+            model_cls.model_validate_json(content)
+        except (ValidationError, ValueError):
+            return False
+        return True
+    # Backward-compatible fallback: a plain JSON parse is enough.
+    try:
+        json.loads(content)
+    except ValueError:
+        return False
+    return True
 
 
 def is_stage_complete(
@@ -102,30 +140,45 @@ def is_stage_complete(
 ) -> bool:
     """Return whether ``stage`` is complete for this job.
 
-    Per-stage file-existence rule (D-11):
+    Per-stage file-existence rule (D-11); Plan 01-04 M1+M2 adds
+    Pydantic validation:
 
-    - ``ingested``: ``source_path(...)`` exists.
-    - ``transcribed``: ``transcript_path(...)`` exists.
-    - ``diarized``: ``diarization_path(...)`` exists.
+    - ``ingested``: ``source.<ext>`` exists AND is non-empty.
+    - ``transcribed``: ``transcript.json`` exists AND parses as a
+      :class:`Transcript`.
+    - ``diarized``: ``diarization.json`` exists AND parses as a
+      :class:`Diarization`.
     - ``summarized``: for every ``kind`` in ``manifest.summary_kinds``,
-      ``summary_path(..., kind)`` exists.
+      ``summary-<kind>.json`` exists AND parses as a :class:`Summary`.
     - ``done``: True iff ``manifest.current_stage == "done"`` AND every
       applicable prior stage is complete. ``done`` is DERIVED, not
       file-backed - there is no ``done.json`` file.
     """
     if stage == "ingested":
-        return source_path(settings, job_id, "mp4").exists() or any(
-            p.name.startswith("source.") for p in job_dir(settings, job_id).glob("source.*")
-        )
+        # Plan 01-04 M2: ``ingested`` requires a non-empty source file.
+        # The path helpers iterate ``source.*`` to find any extension.
+        d = job_dir(settings, job_id)
+        if not d.is_dir():
+            return False
+        for p in d.glob("source.*"):
+            if parse_stage_file(p):
+                return True
+        return False
     if stage == "transcribed":
-        return parse_stage_file(transcript_path(settings, job_id))
+        return parse_stage_file(
+            transcript_path(settings, job_id), model_cls=Transcript
+        )
     if stage == "diarized":
-        return parse_stage_file(diarization_path(settings, job_id))
+        return parse_stage_file(
+            diarization_path(settings, job_id), model_cls=Diarization
+        )
     if stage == "summarized":
         if not manifest.summary_kinds:
             return False
         for kind in manifest.summary_kinds:
-            if not parse_stage_file(summary_path(settings, job_id, kind)):
+            if not parse_stage_file(
+                summary_path(settings, job_id, kind), model_cls=Summary
+            ):
                 return False
         return True
     if stage == "done":

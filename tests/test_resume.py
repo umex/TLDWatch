@@ -74,7 +74,9 @@ async def test_source_and_transcript_returns_diarized(tmp_data_dir: Path) -> Non
     )
     await write_manifest(s, m)
     source_path(s, j, "mp4").write_bytes(b"\x00" * 16)
-    transcript_path(s, j).write_text(json.dumps({}), encoding="utf-8")
+    transcript_path(s, j).write_text(
+        json.dumps({"job_id": j, "segments": []}), encoding="utf-8"
+    )
     manifest = await _read_or_dump(s, j)
     assert manifest.diarization_enabled is True
     # ingested: complete (source exists)
@@ -95,7 +97,9 @@ async def test_source_and_transcript_diarization_enabled_returns_diarized(
     m = m.model_copy(update={"diarization_enabled": True, "summary_kinds": []})
     await write_manifest(s, m)
     source_path(s, j, "mp4").write_bytes(b"\x00" * 16)
-    transcript_path(s, j).write_text(json.dumps({}), encoding="utf-8")
+    transcript_path(s, j).write_text(
+        json.dumps({"job_id": j, "segments": []}), encoding="utf-8"
+    )
     manifest = await _read_or_dump(s, j)
     assert infer_resume_point(s, j, manifest) == "diarized"
 
@@ -131,7 +135,9 @@ async def test_all_stages_returns_none(tmp_data_dir: Path) -> None:
     )
     await write_manifest(s, m)
     source_path(s, j, "mp4").write_bytes(b"\x00" * 16)
-    transcript_path(s, j).write_text(json.dumps({}), encoding="utf-8")
+    transcript_path(s, j).write_text(
+        json.dumps({"job_id": j, "segments": []}), encoding="utf-8"
+    )
     manifest = await _read_or_dump(s, j)
     assert infer_resume_point(s, j, manifest) is None
 
@@ -148,9 +154,19 @@ async def test_one_summary_missing_returns_summarized(tmp_data_dir: Path) -> Non
     )
     await write_manifest(s, m)
     source_path(s, j, "mp4").write_bytes(b"\x00" * 16)
-    transcript_path(s, j).write_text(json.dumps({}), encoding="utf-8")
+    transcript_path(s, j).write_text(
+        json.dumps({"job_id": j, "segments": []}), encoding="utf-8"
+    )
     summary_path(s, j, "meeting").write_text(
-        json.dumps({}), encoding="utf-8"
+        json.dumps(
+            {
+                "job_id": j,
+                "kind": "meeting",
+                "created_at": "2026-06-15T00:00:00+00:00",
+                "sections": {},
+            }
+        ),
+        encoding="utf-8",
     )
     # investment summary is missing
     manifest = await _read_or_dump(s, j)
@@ -167,8 +183,20 @@ async def test_diarization_disabled_skips_diarized(tmp_data_dir: Path) -> None:
     m = m.model_copy(update={"diarization_enabled": False, "summary_kinds": ["meeting"]})
     await write_manifest(s, m)
     source_path(s, j, "mp4").write_bytes(b"\x00" * 16)
-    transcript_path(s, j).write_text(json.dumps({}), encoding="utf-8")
-    summary_path(s, j, "meeting").write_text(json.dumps({}), encoding="utf-8")
+    transcript_path(s, j).write_text(
+        json.dumps({"job_id": j, "segments": []}), encoding="utf-8"
+    )
+    summary_path(s, j, "meeting").write_text(
+        json.dumps(
+            {
+                "job_id": j,
+                "kind": "meeting",
+                "created_at": "2026-06-15T00:00:00+00:00",
+                "sections": {},
+            }
+        ),
+        encoding="utf-8",
+    )
     manifest = await _read_or_dump(s, j)
     # 'diarized' is skipped (not applicable); 'summarized' is complete
     # (meeting file exists); 'done' derives True (manifest says done + all
@@ -187,7 +215,9 @@ async def test_summary_kinds_empty_skips_summarized(tmp_data_dir: Path) -> None:
     m = m.model_copy(update={"diarization_enabled": False, "summary_kinds": []})
     await write_manifest(s, m)
     source_path(s, j, "mp4").write_bytes(b"\x00" * 16)
-    transcript_path(s, j).write_text(json.dumps({}), encoding="utf-8")
+    transcript_path(s, j).write_text(
+        json.dumps({"job_id": j, "segments": []}), encoding="utf-8"
+    )
     manifest = await _read_or_dump(s, j)
     # 'summarized' is NOT applicable; 'done' is not complete (manifest
     # does not say current_stage='done'); so the resume point is 'done'.
