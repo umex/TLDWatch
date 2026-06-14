@@ -12,6 +12,11 @@ class JobManifest(BaseModel):
     (D-05). It is always kept consistent with the per-job folder contents.
     Lax for output: deserialising existing files should never fail because
     of an unknown future field.
+
+    Plan 01-03 adds ``diarization_enabled`` (default ``False`` - diarization
+    is opt-in per D-11; the settings panel in Phase 7 flips it to True).
+    The default keeps existing manifest JSON files from breaking (the
+    field is missing, Pydantic fills in the default).
     """
 
     schema_version: int = 1
@@ -22,6 +27,7 @@ class JobManifest(BaseModel):
     duration_s: float | None = None
     language: str | None = None
     summary_kinds: list[str] = Field(default_factory=list)
+    diarization_enabled: bool = False
     status: str = "queued"
     current_stage: str | None = None
     stage_timestamps: StageTimestamps
