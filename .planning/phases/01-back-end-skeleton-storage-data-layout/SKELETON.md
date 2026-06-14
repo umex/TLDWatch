@@ -30,7 +30,7 @@ A back-end service boots locally, applies versioned SQLite migrations in WAL mod
 
 - [x] Project scaffold (`pyproject.toml`, `.gitignore`, `data/`, `migrations/`, `app/`, `tests/`)
 - [x] Routing — `GET /health`, `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`, `POST /jobs/{id}/cancel`, `POST /jobs/{id}/stage`, `POST /jobs/{id}/stale-check`, `GET /settings`, `PATCH /settings`, plus FastAPI's `GET /openapi.json` and `GET /docs`
-- [x] Database — `data/app.db` (WAL) with `schema_version`, `jobs`, `settings`; migrations `0001_initial.sql` and `0002_remaining_jobs_columns.sql`; idempotent migration runner
+- [x] Database — `data/app.db` (WAL) with `schema_version`, `jobs`, `settings`; migrations `0001_initial.sql` and `0002_add_source_sha256.sql` through `0007_add_stage_timestamps_json.sql` (one ALTER per file); idempotent per-statement migration runner
 - [x] API — at least one real DB read (`GET /jobs/{id}`) AND one real DB write (`POST /jobs`) AND one real filesystem write (`manifest.json` via atomic helper)
 - [x] Deployment — documented local full-stack run command: `pip install -e .[dev] && uvicorn app.main:app`
 
