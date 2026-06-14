@@ -1,4 +1,4 @@
-"""``POST /jobs`` route - end-to-end job creation.
+"""``POST /jobs`` + read endpoints ``GET /jobs`` and ``GET /jobs/{id}``.
 
 Internal control endpoints (POST /jobs/{id}/stage and
 POST /jobs/{id}/stale-check) are added in Plan 01-03; they are
@@ -9,11 +9,11 @@ access via TrustedHostMiddleware is the security boundary.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_session, get_settings
-from app.jobs.service import create_job
+from app.jobs.service import LIST_LIMIT_CAP, LIST_LIMIT_DEFAULT, create_job, get_job, list_jobs
 from app.models.job import CreateJobRequest, JobResponse
 from app.models.manifest import JobManifest
 from app.models.settings import Settings
@@ -45,3 +45,35 @@ async def post_job(
         source_type=payload.source_type,
         source_path=payload.source_path,
     )
+
+
+@router.get("", response_model=list[JobResponse])
+async def get_jobs(
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=LIST_LIMIT_DEFAULT, ge=1),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> list[JobResponse]:
+    """List jobs ordered by ``created_at`` DESC.
+
+    Optional ``?status=`` filter, ``?limit=`` (silently capped at
+    :data:`LIST_LIMIT_CAP`), and ``?offset=`` for pagination.
+    """
+    return await list_jobs(
+        session,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/{job_id}", response_model=JobResponse)
+async def get_job_by_id(
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> JobResponse:
+    """Return one job by id, or 404 with ``{"detail": "job not found"}``."""
+    job = await get_job(session, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return job
