@@ -36,8 +36,18 @@ async def patch_settings(
 ) -> Settings:
     """Apply a PATCH to the settings; emit ``X-Restart-Required: true``
     on the response when ``data_dir`` actually changed.
+
+    The response body is the in-memory state AFTER the PATCH:
+
+    - When ``data_dir`` changes (restart-required), the in-memory
+      state is unchanged (Plan 01-04 H1: defer the swap to restart).
+      The body is the BOOT value of ``data_dir``; the new value is
+      durable on disk under the ``pending`` key.
+    - When no restart is required (omitted ``data_dir`` or same
+      value), the body is the new in-memory state (which equals the
+      patched value).
     """
-    new, restart_required = await apply_update(payload)
+    result, restart_required = await apply_update(payload)
     if restart_required:
         response.headers["X-Restart-Required"] = "true"
-    return new
+    return result

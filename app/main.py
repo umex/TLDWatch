@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Wrote initial settings file at %s", bootstrap_path)
 
-    settings = settings_service.load_settings_from_disk(bootstrap_path)
+    settings, pending = settings_service.load_settings_from_disk(bootstrap_path)
 
     # Surface a manual override at boot (does not block startup).
     try:
@@ -88,6 +88,20 @@ async def lifespan(app: FastAPI):
 
     session_factory = make_sessionmaker(engine)
     configure(session_factory, settings)
+
+    # H1: install any pending restart-required change as the in-memory
+    # current. The pending value was written to disk on a prior PATCH
+    # /settings with a restart-required data_dir change. apply_pending
+    # rewrites the disk file without the pending key so the next boot
+    # does not re-apply.
+    old_data_dir = settings.data_dir
+    if settings_service.apply_pending():
+        new_settings = settings_service.current()
+        logger.info(
+            "applied pending settings on boot: data_dir changed from %s to %s",
+            old_data_dir,
+            new_settings.data_dir,
+        )
 
     # Startup reconciliation: walk every per-job folder and UPDATE
     # any DB row that has drifted from its manifest (Codex HIGH #1
