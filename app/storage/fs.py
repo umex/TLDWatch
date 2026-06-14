@@ -23,7 +23,7 @@ def bootstrap_settings_path() -> Path:
     process working directory. Patching ``settings.data_dir`` does not
     move this file.
     """
-    return Path(__file__).resolve().parent.parent / "data" / "settings.json"
+    return Path(__file__).resolve().parent.parent.parent / "data" / "settings.json"
 
 
 def data_dir(settings: Settings) -> Path:

@@ -1,8 +1,7 @@
-from __future__ import annotations
-
+from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from app.models.common import StageTimestamps
 
@@ -36,7 +35,9 @@ class JobResponse(BaseModel):
 
     Strict output for the API boundary; the ``id`` is a UUIDv4 string and
     ``created_at`` is a timezone-aware UTC ``datetime`` (the
-    ``+00:00`` offset is preserved on the wire as a real suffix).
+    ``+00:00`` offset is preserved on the wire as a real suffix, not
+    the ``Z`` shorthand, so the timestamp is unambiguously parseable
+    by strict ISO 8601 consumers).
     """
 
     model_config = ConfigDict(strict=True, extra="forbid")
@@ -46,6 +47,13 @@ class JobResponse(BaseModel):
     created_at: datetime
     source_type: str | None = None
     current_stage: str | None = None
+
+    @field_serializer("created_at")
+    def _serialize_created_at(self, value: datetime) -> str:
+        # Pydantic v2 defaults to the ``Z`` shorthand for UTC; we
+        # emit the full ``+00:00`` offset so consumers using strict
+        # ISO 8601 parsers round-trip cleanly.
+        return value.isoformat()
 
 
 # Re-export the timestamp container for convenience to downstream modules
