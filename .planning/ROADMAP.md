@@ -37,7 +37,7 @@ A local-first web app that turns any video (local file, YouTube URL, or YouTube 
 Plans:
 **Wave 1**
 
-- [ ] 01-01: FastAPI service + OpenAPI surface
+- [x] 01-01: FastAPI service + OpenAPI surface
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -252,7 +252,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Back-end Skeleton + Storage + Data Layout | 0/3 | Not started | - |
+| 1. Back-end Skeleton + Storage + Data Layout | 1/3 | In Progress|  |
 | 2. GPU Backend Detection + Model Manager | 0/3 | Not started | - |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 0/3 | Not started | - |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 0/3 | Not started | - |
