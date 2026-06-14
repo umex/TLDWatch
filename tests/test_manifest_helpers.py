@@ -105,7 +105,12 @@ async def test_update_stage_writes_manifest_first(
         if real_execute is None:
             raise RuntimeError("setup error")
         sql = str(stmt)
-        if "UPDATE jobs SET current_stage" in sql:
+        # Plan 01-04 H3+H4: the UPDATE SQL was extended to project
+        # ``status`` and the full metadata columns. The new statement
+        # starts ``UPDATE jobs SET status = :status, current_stage = ...``;
+        # match on the unique ``UPDATE jobs SET status = :status,
+        # current_stage`` prefix so this guard catches the new SQL too.
+        if "UPDATE jobs SET status = :status, current_stage" in sql:
             raise AssertionError("DB UPDATE blocked for the test")
         return await real_execute(stmt, params)
 
