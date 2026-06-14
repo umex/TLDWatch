@@ -136,7 +136,20 @@ app = FastAPI(title="TranscriptionAndNotes", version="0.1.0", lifespan=lifespan)
 # See Plan 01-02 success criteria: TranscriptSegment, Summary,
 # Settings, UpdateSettingsRequest must all appear in
 # components.schemas.
-_EXTRA_OPENAPI_MODELS = [TranscriptSegment, Transcript, Summary]
+#
+# Plan 01-03 adds the new internal-mutator request/response models
+# (StageUpdateRequest, StaleCheckResponse, ManifestPatch) so the
+# OpenAPI schema carries the full per-job control surface.
+from app.models.job import ManifestPatch, StageUpdateRequest, StaleCheckResponse
+
+_EXTRA_OPENAPI_MODELS = [
+    TranscriptSegment,
+    Transcript,
+    Summary,
+    ManifestPatch,
+    StageUpdateRequest,
+    StaleCheckResponse,
+]
 
 
 def _custom_openapi():  # noqa: ANN202
