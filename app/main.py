@@ -40,6 +40,8 @@ from app.api.routes_health import router as health_router
 from app.api.routes_jobs import router as jobs_router
 from app.api.routes_settings import router as settings_router
 from app.models.settings import Settings
+from app.models.summary import Summary
+from app.models.transcript import Transcript, TranscriptSegment
 from app.settings import service as settings_service
 from app.storage.atomic import atomic_write_json
 from app.storage.db import apply_migrations, make_engine, make_sessionmaker
@@ -102,6 +104,47 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="TranscriptionAndNotes", version="0.1.0", lifespan=lifespan)
+
+# Storage models that the typed OpenAPI surface must expose to
+# downstream consumers (openapi-typescript in Phase 5) even before
+# their /transcripts and /summaries routes are added. We patch
+# ``app.openapi`` to inject their JSON schemas into
+# ``components.schemas``; without this, Pydantic only registers
+# models that are reachable from a route handler.
+#
+# See Plan 01-02 success criteria: TranscriptSegment, Summary,
+# Settings, UpdateSettingsRequest must all appear in
+# components.schemas.
+_EXTRA_OPENAPI_MODELS = [TranscriptSegment, Transcript, Summary]
+
+
+def _custom_openapi():  # noqa: ANN202
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=app.openapi_version,
+        description=app.description,
+        routes=app.routes,
+    )
+    components = schema.setdefault("components", {})
+    schemas = components.setdefault("schemas", {})
+    for model in _EXTRA_OPENAPI_MODELS:
+        key = model.__name__
+        if key in schemas:
+            continue
+        # ``model_json_schema`` is the Pydantic v2 way to get the
+        # JSON-schema representation. ``ref_template`` is left at
+        # the FastAPI default (``#/components/schemas/{model}``).
+        schemas[key] = model.model_json_schema(ref_template="#/components/schemas/{model}")
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _custom_openapi  # type: ignore[assignment]
 
 app.add_middleware(
     CORSMiddleware,
