@@ -10,10 +10,16 @@ manifest write leaves a DB row pointing at a missing folder; that
 is reconcilable on boot by either the orchestrator (Phase 4) or a
 re-run of the job. A crash between folder creation and manifest
 write is mitigated because the manifest is written atomically.
+
+Plan 01-04 H5: ``create_job`` compensates for folder/manifest
+failures by DELETING the just-INSERTed row before re-raising the
+exception. The DELETE happens on the SAME session so the row is
+gone before the caller sees the exception.
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import sqlalchemy as sa
@@ -27,6 +33,8 @@ from app.models.manifest import JobManifest  # noqa: F401  (re-exported for test
 from app.models.settings import Settings
 from app.storage.fs import ensure_job_dir
 from app.util.time import utcnow_iso
+
+_log = logging.getLogger(__name__)
 
 # Pagination: silent cap per Codex MEDIUM ("List pagination is
 # incomplete - silent cap of 200"). The cap protects the API from
@@ -42,7 +50,13 @@ async def create_job(
     source_type: str | None = None,
     source_path: str | None = None,
 ) -> JobResponse:
-    """Create a new job end-to-end: DB row, per-job folder, manifest."""
+    """Create a new job end-to-end: DB row, per-job folder, manifest.
+
+    Plan 01-04 H5: if the folder/manifest step fails after the DB
+    INSERT was committed, the row is DELETED before the exception
+    propagates. A partial orphan (DB row but no folder or no
+    manifest) is impossible.
+    """
     job_id = new_job_id()
     now_iso = utcnow_iso()
 
@@ -63,8 +77,33 @@ async def create_job(
     )
     await session.commit()
 
-    await ensure_job_dir(settings, job_id)
-    await write_manifest(settings, empty_manifest(job_id))
+    # H5: compensate by DELETing the just-INSERTed row on any failure
+    # in the folder/manifest step. The DELETE happens on the same
+    # session so the row is gone before the caller sees the exception
+    # (which the route layer turns into a 5xx response).
+    try:
+        await ensure_job_dir(settings, job_id)
+        await write_manifest(settings, empty_manifest(job_id))
+    except Exception as exc:
+        _log.warning(
+            "create_job: folder/manifest step failed for %s (%s); "
+            "compensating by deleting the DB row",
+            job_id,
+            exc,
+        )
+        try:
+            await session.execute(
+                text("DELETE FROM jobs WHERE id = :id"),
+                {"id": job_id},
+            )
+            await session.commit()
+        except Exception:  # pragma: no cover - defensive logging only
+            _log.exception(
+                "create_job: compensation DELETE failed for %s; "
+                "orphan row may remain",
+                job_id,
+            )
+        raise
 
     return JobResponse(
         id=job_id,
