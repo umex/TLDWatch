@@ -15,11 +15,14 @@ What ``reconcile_all`` does:
    ``missing_manifest`` - a leftover from a crash; the folder is
    NOT auto-removed because the user may have data we cannot
    inspect).
-3. Reads the current DB row's ``current_stage`` and
-   ``stage_timestamps_json``.
-4. UPDATEs the DB row iff the manifest's ``current_stage`` or
-   ``stage_timestamps_json`` differs from the DB row. The
-   ``updated_at`` column is also refreshed.
+3. Reads the full projected state from the DB row (status,
+   current_stage, stage_timestamps_json, language, duration_s,
+   source_*, summary_kinds_json).
+4. UPDATEs the DB row iff any projected field differs from the
+   manifest's value. Plan 01-04 H4: the UPDATE projects ALL
+   metadata columns (not just current_stage/stage_timestamps_json),
+   and the ``updated_at`` is the latest non-None stage timestamp
+   (via :func:`_latest_ts`).
 
 Returns a small summary dict ``{scanned, updated, missing_manifests}``
 suitable for logging.
@@ -30,12 +33,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.jobs.manifest import read_manifest
+from app.jobs.manifest import _latest_ts, read_manifest, stage_to_status
 from app.models.settings import Settings
 from app.storage.fs import data_dir
 
@@ -52,6 +55,12 @@ async def reconcile_all(
     A new short-lived session is opened per job to keep the
     transaction scope small and to allow other requests to make
     progress in parallel.
+
+    Plan 01-04 H4: the SELECT reads the full projected state, the
+    drift check compares every projected field, and the UPDATE
+    writes every projected column. The ``updated_at`` is the latest
+    non-None stage timestamp (via :func:`_latest_ts`) so a healed
+    row reflects the most-recent stage transition.
     """
     jobs_root = data_dir(settings) / "jobs"
     if not jobs_root.is_dir():
@@ -78,11 +87,19 @@ async def reconcile_all(
             summary["missing_manifests"].append(entry)
             continue
 
+        # Compute the projected values from the manifest. These are
+        # what the DB row should look like AFTER reconciliation.
         new_ts_json = json.dumps(manifest.stage_timestamps.model_dump())
+        new_status = stage_to_status(manifest.current_stage, manifest)
+        new_summary_kinds_json = json.dumps(manifest.summary_kinds)
+        new_updated_at = _latest_ts(manifest.stage_timestamps)
+
         async with session_factory() as session:
             result = await session.execute(
                 text(
-                    "SELECT current_stage, stage_timestamps_json "
+                    "SELECT current_stage, stage_timestamps_json, status, "
+                    "language, duration_s, source_type, source_path, "
+                    "source_sha256, summary_kinds_json "
                     "FROM jobs WHERE id = :id"
                 ),
                 {"id": entry},
@@ -100,30 +117,72 @@ async def reconcile_all(
                     entry,
                 )
                 continue
-            db_stage = row[0]
-            db_ts_json = row[1]
-            if db_stage == manifest.current_stage and db_ts_json == new_ts_json:
+            (
+                db_stage,
+                db_ts_json,
+                db_status,
+                db_language,
+                db_duration_s,
+                db_source_type,
+                db_source_path,
+                db_source_sha256,
+                db_summary_kinds_json,
+            ) = row
+
+            # Drift detection: compare every projected field. The DB
+            # stores ``summary_kinds_json`` as a JSON-encoded string;
+            # NULL on the row maps to ``[]`` for comparison.
+            db_summary_kinds_json_normalised = (
+                db_summary_kinds_json if db_summary_kinds_json else "[]"
+            )
+            drifted = (
+                db_stage != manifest.current_stage
+                or db_ts_json != new_ts_json
+                or db_status != new_status
+                or db_language != manifest.language
+                or db_duration_s != manifest.duration_s
+                or db_source_type != manifest.source_type
+                or db_source_path != manifest.source_path
+                or db_source_sha256 != manifest.source_sha256
+                or db_summary_kinds_json_normalised != new_summary_kinds_json
+            )
+            if not drifted:
                 continue
+
             await session.execute(
                 text(
-                    "UPDATE jobs SET current_stage = :stage, "
-                    "stage_timestamps_json = :ts_json, updated_at = :now "
+                    "UPDATE jobs SET status = :status, "
+                    "current_stage = :stage, "
+                    "stage_timestamps_json = :ts_json, updated_at = :now, "
+                    "source_type = :source_type, source_path = :source_path, "
+                    "source_sha256 = :source_sha256, duration_s = :duration_s, "
+                    "language = :language, "
+                    "summary_kinds_json = :summary_kinds_json "
                     "WHERE id = :id"
                 ),
                 {
+                    "status": new_status,
                     "stage": manifest.current_stage,
                     "ts_json": new_ts_json,
-                    "now": manifest.stage_timestamps.queued,
+                    "now": new_updated_at,
+                    "source_type": manifest.source_type,
+                    "source_path": manifest.source_path,
+                    "source_sha256": manifest.source_sha256,
+                    "duration_s": manifest.duration_s,
+                    "language": manifest.language,
+                    "summary_kinds_json": new_summary_kinds_json,
                     "id": entry,
                 },
             )
             await session.commit()
             summary["updated"] += 1
             _log.info(
-                "reconcile: healed %s (stage %s -> %s)",
+                "reconcile: healed %s (stage %s -> %s, status %s -> %s)",
                 entry,
                 db_stage,
                 manifest.current_stage,
+                db_status,
+                new_status,
             )
 
     _log.info(
