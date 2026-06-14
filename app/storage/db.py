@@ -64,8 +64,31 @@ def make_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
+def _split_sql_statements(raw: str) -> list[str]:
+    """Split a multi-statement SQL file into individual non-empty statements.
+
+    SQLite's aiosqlite driver (and SQLAlchemy's ``text()``) execute one
+    statement per ``execute()`` call. Our migration files contain only
+    DDL with no semicolons inside string literals, so a simple
+    semicolon-split with comment stripping is sufficient and avoids
+    pulling in a full SQL parser.
+    """
+    out: list[str] = []
+    for line in raw.splitlines():
+        # Drop full-line SQL comments so their semicolons do not split
+        # the stream. Inline ``--`` comments are not produced by our
+        # generator; a full-line strip is enough.
+        stripped = line.strip()
+        if stripped.startswith("--"):
+            continue
+        out.append(line)
+    body = "\n".join(out)
+    return [s.strip() for s in body.split(";") if s.strip()]
+
+
 def _migrations_dir() -> Path:
-    return Path(__file__).resolve().parent.parent / MIGRATIONS_DIR_NAME
+    # Project root: <repo>/migrations/ (sibling of the app/ package).
+    return Path(__file__).resolve().parent.parent.parent / MIGRATIONS_DIR_NAME
 
 
 async def apply_migrations(engine: AsyncEngine) -> None:
@@ -103,8 +126,16 @@ async def apply_migrations(engine: AsyncEngine) -> None:
                 continue
 
             logger.info("applying migration %s", sql_file.name)
-            statements = sa.text(sql_file.read_text(encoding="utf-8"))
-            await conn.execute(statements)
+            # SQLAlchemy's ``text()`` executes a single statement per
+            # ``execute()``; SQLite's aiosqlite driver enforces the same
+            # constraint. Split the file into individual statements on
+            # semicolons (a robust-enough split for our DDL-only files
+            # which do not embed semicolons inside string literals).
+            raw = sql_file.read_text(encoding="utf-8")
+            for stmt in _split_sql_statements(raw):
+                if not stmt:
+                    continue
+                await conn.execute(sa.text(stmt))
             applied_at = datetime.now(timezone.utc).isoformat()
             await conn.execute(
                 sa.text(
