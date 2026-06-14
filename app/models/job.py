@@ -19,6 +19,13 @@ JobStatus = Literal[
     "cancelled",
 ]
 
+# StageName literal is duplicated here (instead of imported from
+# app.jobs.resume) to avoid a circular import: app.jobs.resume
+# imports from app.models.manifest which is sibling of this module.
+StageNameLiteral = Literal[
+    "ingested", "transcribed", "diarized", "summarized", "done"
+]
+
 
 class CreateJobRequest(BaseModel):
     """Payload for ``POST /jobs``.
@@ -31,6 +38,61 @@ class CreateJobRequest(BaseModel):
 
     source_type: str | None = None
     source_path: str | None = None
+
+
+class ManifestPatch(BaseModel):
+    """Allowlisted, strict patch for the on-disk manifest.
+
+    The plan truth statement (Codex HIGH #7): the patch ONLY forwards
+    the user-mutable fields. The protected fields
+    (``current_stage``, ``job_id``, ``schema_version``,
+    ``stage_timestamps``, ``status``, ``error``) are owned by the
+    helper that applies the patch (:func:`app.jobs.manifest.update_stage`)
+    and CANNOT be set via this model.
+
+    - ``strict=True`` rejects wrong types (``source_type: 123`` -> 422).
+    - ``extra="forbid"`` rejects unknown keys (``unknown_field: x`` -> 422)
+      and also catches the protected fields (they are not on this
+      model, so they are extras).
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    source_type: str | None = None
+    source_path: str | None = None
+    source_sha256: str | None = None
+    duration_s: float | None = None
+    language: str | None = None
+    summary_kinds: list[str] | None = None
+
+
+class StageUpdateRequest(BaseModel):
+    """Payload for ``POST /jobs/{id}/stage``.
+
+    Strict input; ``stage`` is the new value for ``manifest.current_stage``,
+    and ``manifest_patch`` (optional) carries the user-mutable fields the
+    caller wants to change at the same time.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    stage: StageNameLiteral
+    manifest_patch: ManifestPatch | None = None
+
+
+class StaleCheckRequest(BaseModel):
+    """Payload for ``POST /jobs/{id}/stale-check``."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    threshold_s: int = 600
+
+
+class StaleCheckResponse(BaseModel):
+    """Response for ``POST /jobs/{id}/stale-check``."""
+
+    stale: bool
+    marked: bool
 
 
 class JobResponse(BaseModel):
@@ -80,7 +142,18 @@ class JobResponse(BaseModel):
 # Re-export the timestamp container for convenience to downstream modules
 # that need to construct manifests without importing the common module
 # directly. Avoids a circular import through ``app.jobs.manifest``.
-__all__ = ["CreateJobRequest", "JobResponse", "JobStatus", "StageTimestamps", "Field"]
+__all__ = [
+    "CreateJobRequest",
+    "JobResponse",
+    "JobStatus",
+    "ManifestPatch",
+    "StageNameLiteral",
+    "StageTimestamps",
+    "StageUpdateRequest",
+    "StaleCheckRequest",
+    "StaleCheckResponse",
+    "Field",
+]
 
 
 def _row_to_response(row: Any) -> JobResponse:
