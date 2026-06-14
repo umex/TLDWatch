@@ -2,8 +2,12 @@
 ``PATCH /settings`` (Codex HIGH item 9).
 
 The header is set when the PATCH actually changes ``data_dir``;
-it is NOT set for an empty body (``{}``) or for a PATCH that sets
-``data_dir`` to its current value.
+it is NOT set for a PATCH that sets ``data_dir`` to its current
+value.
+
+Plan 01-04 (T8): the ``data_dir`` field is now required on
+``UpdateSettingsRequest``; a PATCH with an empty body returns 422
+(was 200 with no header in Plan 01-02).
 """
 
 from __future__ import annotations
@@ -20,8 +24,23 @@ async def test_data_dir_change_sets_header(client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_empty_patch_omits_header(client: httpx.AsyncClient) -> None:
+async def test_empty_patch_returns_422(client: httpx.AsyncClient) -> None:
+    """Plan 01-04 T8: data_dir is required; an empty body is rejected."""
     resp = await client.patch("/settings", json={})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_same_data_dir_omits_header(client: httpx.AsyncClient) -> None:
+    """PATCH with the SAME data_dir as the current value is not
+    restart-required and omits the X-Restart-Required header.
+    """
+    # Read the current value.
+    current_resp = await client.get("/settings")
+    assert current_resp.status_code == 200
+    current = current_resp.json()["data_dir"]
+
+    resp = await client.patch("/settings", json={"data_dir": current})
     assert resp.status_code == 200, resp.text
-    # Empty PATCH: no field set, no restart required.
+    # No restart-required header: the value did not change.
     assert "x-restart-required" not in {k.lower() for k in resp.headers.keys()}
