@@ -38,7 +38,9 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from app.api.dependencies import configure
 from app.api.routes_health import router as health_router
 from app.api.routes_jobs import router as jobs_router
+from app.api.routes_settings import router as settings_router
 from app.models.settings import Settings
+from app.settings import service as settings_service
 from app.storage.atomic import atomic_write_json
 from app.storage.db import apply_migrations, make_engine, make_sessionmaker
 from app.storage.fs import bootstrap_settings_path
@@ -62,9 +64,7 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Wrote initial settings file at %s", bootstrap_path)
 
-    settings = Settings.model_validate_json(
-        bootstrap_path.read_text(encoding="utf-8")
-    )
+    settings = settings_service.load_settings_from_disk(bootstrap_path)
 
     # Surface a manual override at boot (does not block startup).
     try:
@@ -117,3 +117,4 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(jobs_router)
+app.include_router(settings_router)
