@@ -89,6 +89,27 @@ async def lifespan(app: FastAPI):
     session_factory = make_sessionmaker(engine)
     configure(session_factory, settings)
 
+    # Startup reconciliation: walk every per-job folder and UPDATE
+    # any DB row that has drifted from its manifest (Codex HIGH #1
+    # follow-up). A reconcile failure means the DB and FS are in a
+    # state the app cannot safely serve, so re-raise and refuse to
+    # start (D-08 posture).
+    from app.jobs import reconcile as reconcile_module
+
+    try:
+        reconcile_summary = await reconcile_module.reconcile_all(
+            settings, session_factory
+        )
+        logger.info(
+            "reconcile summary: scanned=%d updated=%d missing_manifests=%d",
+            reconcile_summary.get("scanned", 0),
+            reconcile_summary.get("updated", 0),
+            len(reconcile_summary.get("missing_manifests", [])),
+        )
+    except Exception:
+        logger.exception("startup reconciliation failed; refusing to start")
+        raise
+
     # Announce ready to anyone watching stdout (uvicorn re-prints
     # access logs, but this is the one-line ready banner the
     # acceptance criteria check for).
