@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-06-14T17:25:57.307Z",
+  "phase": "01",
+  "phase_name": "back-end-skeleton-storage-data-layout",
+  "phase_dir": ".planning/phases/01-back-end-skeleton-storage-data-layout",
+  "plan": 3,
+  "task": 7,
+  "total_tasks": 7,
+  "status": "phase_complete_pending_verification",
+  "completed_tasks": [
+    {"id": 1, "plan": "01-01", "name": "Walking Skeleton (FastAPI boot + first end-to-end job creation)", "status": "done", "commit": "1e5d895"},
+    {"id": 2, "plan": "01-02", "name": "Full Pydantic surface + read endpoints + settings", "status": "done", "commit": "797e6f4"},
+    {"id": 3, "plan": "01-03", "name": "Per-job filesystem + resume + cleanup + reconcile", "status": "done", "commit": "2f79b0f"}
+  ],
+  "remaining_tasks": [
+    {"id": 4, "name": "Post-execution verification (live smoke checks: reconcile self-heal, cancel ordering with mocked rmtree)", "status": "in_progress"},
+    {"id": 5, "name": "Update tracking (ROADMAP 01-03 done, advance STATE, commit)", "status": "not_started"},
+    {"id": 6, "name": "Pop or drop pre-execute stash (gsd-pre-execute-dirty-files)", "status": "not_started"},
+    {"id": 7, "name": "Run /gsd-verify-phase 1", "status": "not_started"},
+    {"id": 8, "name": "Route to Phase 2 (/gsd-plan-phase 2)", "status": "not_started"}
+  ],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [
+    {"decision": "Manually commit SUMMARY.md when executor stalls", "rationale": "Stream watchdog false alarm; per workflow fallback rule (verify via FS + git, never block indefinitely)."},
+    {"decision": "Drop the pre-execute stash on resume", "rationale": "review.default_reviewers belongs in config.json permanently; STACK.md note was a research clarification, not a project change."},
+    {"decision": "Accept 422 for protected fields in manifest_patch (not silent ignore as plan prose said)", "rationale": "Plan test test_patch_cannot_set_protected_fields explicitly requires 422. Plan prose and test are inconsistent; test is the authoritative contract. Exectuor chose safer 422."},
+    {"decision": "Use 404 (not 400) for path-traversal job ids", "rationale": "Per executor deviation #1: routes look up the job first, returning 404 consistently with GET /jobs/{id}. Security invariant (no filesystem access) preserved either way."}
+  ],
+  "uncommitted_files": [
+    ".planning/config.json (modified, contains review.default_reviewers setting from prior session)"
+  ],
+  "stashes": [
+    {"name": "stash@{0}", "branch": "master", "message": "gsd-pre-execute-dirty-files", "contents": ["review.default_reviewers config", "STACK.md Win 10/11 note"]}
+  ],
+  "next_action": "Drop pre-execute stash, update tracking (ROADMAP/STATE), commit, then /gsd-verify-phase 1",
+  "context_notes": "Phase 1 fully implemented on master (78 tests passing). Pause was invoked during final live smoke verification. All three SUMMARY.md files committed. User prefers small commits and verification at each step.",
+  "head_sha": "2f79b0f",
+  "test_count": 78
+}
