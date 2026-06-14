@@ -17,5 +17,10 @@
   },
   "ship": {
     "pr_body_sections": []
+  },
+  "review": {
+    "default_reviewers": [
+      "codex"
+    ]
   }
 }
