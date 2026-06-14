@@ -149,9 +149,17 @@ async def apply_migrations(engine: AsyncEngine) -> None:
             # record the version row). Any other error re-raises so
             # the migration aborts and the server refuses to start.
             raw = sql_file.read_text(encoding="utf-8")
+            # Plan 01-04 T9: track per-statement outcome so the
+            # all-duplicate-column case can still record the version
+            # row. ``stmt_total`` is the count of non-empty statements
+            # in the file; ``stmt_errors`` is the count of
+            # duplicate-column errors swallowed.
+            stmt_total = 0
+            stmt_errors = 0
             for stmt in _split_sql_statements(raw):
                 if not stmt:
                     continue
+                stmt_total += 1
                 try:
                     await conn.execute(sa.text(stmt))
                 except sa.exc.OperationalError as exc:
@@ -161,8 +169,30 @@ async def apply_migrations(engine: AsyncEngine) -> None:
                             sql_file.name,
                             exc,
                         )
+                        stmt_errors += 1
                         continue
                     raise
+            # If every statement was a duplicate-column error, the
+            # column work was done in a prior partial run that did
+            # not record the version row. The only thing missing
+            # is the version row; we record it here so the
+            # schema_version table reflects reality.
+            if stmt_total > 0 and stmt_errors == stmt_total:
+                logger.info(
+                    "all %d statements in %s were already-applied columns; "
+                    "recording version row",
+                    stmt_total,
+                    sql_file.name,
+                )
+            elif stmt_errors > 0:
+                # Partial duplicate-column errors: the file is in a
+                # half-applied state. Re-raise so the operator
+                # notices; we do NOT pretend the migration was clean.
+                raise RuntimeError(
+                    f"partial apply of {sql_file.name}: "
+                    f"{stmt_errors}/{stmt_total} statements were "
+                    "duplicate-column errors"
+                )
             applied_at = datetime.now(timezone.utc).isoformat()
             await conn.execute(
                 sa.text(
