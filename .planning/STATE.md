@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Codex implementation review committed at 0637cd1. 5 HIGH + 3 MEDIUM findings flagged. User chose to plan a fix wave before Phase 2. Context hit 67% mid-planning; need fresh session to draft 01-04-PLAN.md (gap-closure).
-last_updated: "2026-06-14T22:55:03.416Z"
-last_activity: 2026-06-14 -- Phase 01 execution started
+status: complete
+stopped_at: Phase 1 plan 4 (01-04) gap-closure complete — 5 HIGH + 3 MEDIUM Codex findings fixed, 113 pytest cases green, 6-step verification section green. Phase 1 ready for verification.
+last_updated: "2026-06-15T00:00:00.000Z"
+last_activity: 2026-06-15 -- Phase 01 plan 4 (01-04) gap-closure complete
 progress:
   total_phases: 10
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 4
+  completed_plans: 4
   percent: 10
 ---
 
@@ -25,31 +25,31 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 
 ## Current Position
 
-Phase: 01 (back-end-skeleton-storage-data-layout) — EXECUTING
-Plan: 3 of 3
-Status: Ready to execute
-Last activity: 2026-06-14 -- Phase 01 execution started
+Phase: 01 (back-end-skeleton-storage-data-layout) — COMPLETE
+Plan: 4 of 4
+Status: Phase 01 ready for verification
+Last activity: 2026-06-15 -- Phase 01 plan 4 (01-04) gap-closure complete
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [████░░░░░░░░░] 10%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 4
 - Average duration: — min
-- Total execution time: 0 hours
+- Total execution time: ~3.5 hours (Phase 01 plans 01..04, including UAT + gap-closure)
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 01 | 4 | 4 | — |
 
 **Recent Trend:**
 
-- Last 5 plans: —
-- Trend: —
+- Last 5 plans: 01-01, 01-02, 01-03, 01-04 (UAT green at 78 tests, gap-closure green at 113 tests)
+- Trend: stable
 
 *Updated after each plan completion*
 
@@ -62,6 +62,7 @@ Recent decisions affecting current work:
 
 - Roadmap uses 10 phases, mvp mode, standard granularity — derived from research/SUMMARY.md build-order rationale.
 - Project skill guidance loaded; project skills directory was absent in this run, so no per-skill rules were applied.
+- **Plan 01-04 (gap-closure):** `PATCH /settings` is restart-only via a `pending` slot in the on-disk JSON; the in-memory state is not swapped until the next boot (`apply_pending()` in the lifespan). `stage_to_status(stage, manifest)` is the single source of truth for the stage-to-status mapping; `update_stage` writes status + full metadata in a single UPDATE; `reconcile_all` projects the same columns on boot. `create_job` compensates the DB row on folder/manifest failure. `parse_stage_file` validates stage files against typed Pydantic models. `mark_stale` is a no-op on terminal rows. Migration runner records the version on the all-duplicate-column path.
 
 ### Pending Todos
 
@@ -91,48 +92,39 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-14T23:20:00.000Z
-Stopped at: Codex implementation review committed at 0637cd1. 5 HIGH + 3 MEDIUM findings flagged. User chose to plan a fix wave before Phase 2. Context hit 67% mid-planning; need fresh session to draft 01-04-PLAN.md (gap-closure).
-Resume file: .planning/phases/01-back-end-skeleton-storage-data-layout/01-IMPLEMENTATION-REVIEW.md (the source-of-truth gap list)
+Last session: 2026-06-15T00:00:00.000Z
+Stopped at: Phase 1 plan 4 (01-04) gap-closure complete — 5 HIGH + 3 MEDIUM Codex findings fixed, 113 pytest cases green, 6-step verification section green. Phase 1 ready for verification.
+Resume file: .planning/phases/01-back-end-skeleton-storage-data-layout/01-04-SUMMARY.md
 
-### Open review-driven follow-ups (to plan as 01-04 in a fresh session)
+### Gap-closure wave (01-04) — closed
 
-**HIGH (3 real bugs + 1 documented deferral):**
+All 5 HIGH + 3 MEDIUM findings from the Codex implementation review are fixed in the code and covered by tests:
 
-- H1: Restart-only settings semantics — defer `_State.settings = new` in `app/settings/service.py:114` until restart. Save the patch to a "pending" slot; return it on the response header. Restart picks it up.
-- H2: Correct `POST /jobs` OpenAPI response — move the `JobManifest` registration out of `responses=` into the `app.openapi` patch (where `Transcript`/`Summary` already get registered). Make the operation response honest.
-- H3: Project `status` to DB on every stage transition — `update_stage` at `app/jobs/manifest.py:133` needs a `status` column UPDATE. Status mapping table: `current_stage in {None, "ingested"} -> "queued"`, `"transcribed" -> "transcribing"`, etc.
-- H4 (real): Manifest patches (language, duration, summary_kinds) are never projected to SQLite. Extend `update_stage` SQL to UPDATE these columns too. Extend `reconcile.py` SQL to project them on boot.
-- H5 (deferred to Phase 4 per 01-01 SUMMARY): `create_job` orphan-row compensation. Document the decision to defer or implement minimal compensation (delete the row on manifest-write failure).
+- H1: Restart-only settings semantics — `pending` slot + `apply_pending()` in lifespan. **Done.**
+- H2: OpenAPI 201 references `JobResponse` (not `JobManifest`). **Done.**
+- H3: `status` projected to DB on every stage transition via `stage_to_status()`. **Done.**
+- H4: Manifest patches (language, duration, summary_kinds, source_*) projected to DB on every stage transition + on boot via `reconcile_all`. **Done.**
+- H5: `create_job` orphan-row compensation (DELETE on folder/manifest failure). **Done.**
+- M1: Pydantic-validated stage files (Transcript / Diarization / Summary) in `parse_stage_file`. **Done.**
+- M2: Zero-byte `source.*` rejection. **Done.**
+- M3: Status-aware stale check (skip `done` / `failed` / `cancelled`). **Done.**
 
-**MEDIUM:**
+### Test additions (all done)
 
-- M1: Validate stage files against Pydantic models in `app/jobs/resume.py:72` (use `JobManifest` + per-stage Pydantic models from `app.models`).
-- M2: Reject zero-byte `source.*` files in `app/jobs/resume.py:116`.
-- M3: Status-aware stale check in `app/jobs/cleanup.py:114` (skip `done`/`failed`/`cancelled`).
-
-**LOW (skip for now):**
-
-- Blocking fs in async paths (Phase 4 will replace `/stage` route with worker-bound call)
-- Semantic constraints on timestamps (Phase 2+ — needs domain decisions)
-- `pydantic.ValidationError` import in routes_jobs.py (mild; pragmatic)
-
-### Test additions to plan
-
-- Direct WAL test (open 2 connections, assert journal_mode=wal on both)
-- Migration triple-apply idempotency
-- `data_dir` PATCH restart-only: PATCH does not change `_State.settings`; verify by reading after PATCH
-- `data_dir: null` / empty / relative / file-path rejection
-- OpenAPI: assert the 201 operation response schema is `JobResponse`, not `JobManifest`
-- Stage-to-status transitions: enumerated matrix
-- Manifest patch projection: PATCH `language="en"`, then `GET /jobs/{id}` returns `language="en"`
-- Resume on `{}` / corrupt / zero-byte files
-- Stale check on `done` / `failed` / `cancelled` rows is a no-op
+- Direct WAL test (open 2 connections, assert journal_mode=wal on both) — `tests/test_wal.py`
+- Migration triple-apply idempotency + partial-apply recovery — `tests/test_migration_idempotency.py`
+- `data_dir` PATCH restart-only — `tests/test_settings.py` + `tests/test_settings_restart_required_header.py`
+- `data_dir: null` / empty / relative / file-path rejection — `tests/test_data_dir_validation.py` + `tests/test_settings.py`
+- OpenAPI: assert the 201 operation response schema is `JobResponse`, not `JobManifest` — `tests/test_post_jobs_201_response.py` + `tests/test_openapi.py`
+- Stage-to-status transitions: enumerated matrix — `tests/test_stage_to_status.py`
+- Manifest patch projection: PATCH `language="en"`, then `GET /jobs/{id}` returns `language="en"` — `tests/test_manifest_patch.py` + `tests/test_manifest_helpers.py`
+- Resume on `{}` / corrupt / zero-byte files — `tests/test_resume.py`
+- Stale check on `done` / `failed` / `cancelled` rows is a no-op — `tests/test_cleanup.py`
 
 ### Next command when resuming
 
 ```
-/gsd-plan-phase 1 --gaps
+/gsd-verify-phase 1
 ```
 
-The `--gaps` mode reads `01-IMPLEMENTATION-REVIEW.md` and produces 01-04-PLAN.md (gap-closure wave) to be executed before Phase 2 planning.
+Then plan Phase 2 (transcription pipeline) once Phase 1 verification passes.
