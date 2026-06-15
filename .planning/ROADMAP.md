@@ -61,13 +61,18 @@ Plans:
   4. Loading a model blocks if it would push past 85% of available VRAM; unload is explicit on idle, with a "what's currently in VRAM" indicator exposed for diagnostics.
   5. No two models are resident in VRAM concurrently unless the user explicitly opts in via a settings toggle that is hidden by default.
 
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
 
-- [ ] 02-01: First-run GPU detect + burn-in test + settings.json write
-- [ ] 02-02: Model manager (download, verify, lazy load, idle unload, VRAM probe)
-- [ ] 02-03: ROCm-on-Windows spike (whisper.cpp ROCm build + llama.cpp HIP build, document fallback)
+**Wave 1**
+
+- [ ] 02-01: First-run GPU detect + burn-in test + settings.json write (autonomous; HW-02, HW-03)
+
+**Wave 2** *(blocked on Wave 1 completion; 02-02 and 02-03 run in parallel)*
+
+- [ ] 02-02: Model manager (download, verify, lazy load, idle unload, VRAM probe) (autonomous; HW-02, HW-04, HW-07, HW-09)
+- [ ] 02-03: ROCm-on-Windows spike (whisper.cpp ROCm build + llama.cpp HIP build, document fallback) (autonomous; HW-03)
 
 ### Phase 3: STT Adapter + Audio Chunker + Standalone CLI
 
@@ -253,7 +258,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Back-end Skeleton + Storage + Data Layout | 3/3 | Complete   | 2026-06-14 |
-| 2. GPU Backend Detection + Model Manager | 0/3 | Not started | - |
+| 2. GPU Backend Detection + Model Manager | 0/3 | Planned (3 plans) | - |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 0/3 | Not started | - |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 0/3 | Not started | - |
 | 5. Local File Ingest + History UI + 3-Pane Layout | 0/3 | Not started | - |
