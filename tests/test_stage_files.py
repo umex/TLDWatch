@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from app.models.diagnostics import GpuBackend
 from app.models.settings import Settings
 from app.models.summary import validate_summary_kind
 from app.storage.fs import (
@@ -24,7 +25,7 @@ from app.storage.fs import (
 
 def test_path_helpers(tmp_data_dir: Path) -> None:
     """Every path helper returns a path inside the per-job folder."""
-    s = Settings(data_dir=str(tmp_data_dir / "data"))
+    s = Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
     j = "00000000-0000-0000-0000-000000000001"
     expected_root = tmp_data_dir / "data" / "jobs" / j
 
@@ -79,7 +80,7 @@ def test_validate_summary_kind_rejects_path_traversal() -> None:
 
 def test_source_path_validates_ext(tmp_data_dir: Path) -> None:
     """source_path raises ValueError on bad extensions (no path is built)."""
-    s = Settings(data_dir=str(tmp_data_dir / "data"))
+    s = Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
     j = "00000000-0000-0000-0000-000000000002"
     with pytest.raises(ValueError):
         source_path(s, j, "../../etc/passwd")
@@ -91,7 +92,7 @@ def test_source_path_validates_ext(tmp_data_dir: Path) -> None:
 
 def test_summary_path_validates_kind(tmp_data_dir: Path) -> None:
     """summary_path raises ValueError on bad kinds (no path is built)."""
-    s = Settings(data_dir=str(tmp_data_dir / "data"))
+    s = Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
     j = "00000000-0000-0000-0000-0000-000000000003"
     with pytest.raises(ValueError):
         summary_path(s, j, "../../etc/passwd")
@@ -103,7 +104,7 @@ def test_list_stage_files_and_last_mtime(tmp_data_dir: Path) -> None:
 
     from app.storage.fs import ensure_job_dir
 
-    s = Settings(data_dir=str(tmp_data_dir / "data"))
+    s = Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
     j = "00000000-0000-0000-0000-000000000004"
     asyncio.run(ensure_job_dir(s, j))
 

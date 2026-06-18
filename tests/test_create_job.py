@@ -79,9 +79,10 @@ async def test_create_job_compensates_on_folder_failure(
 
     from app.api import dependencies as deps_module
     from app.jobs import service as jobs_service
+    from app.models.diagnostics import GpuBackend
     from app.models.settings import Settings
 
-    settings = Settings(data_dir=str(tmp_data_dir / "data"))
+    settings = Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
     sf = deps_module.session_factory
     assert sf is not None
 
@@ -115,9 +116,10 @@ async def test_create_job_compensates_on_manifest_failure(
 
     from app.api import dependencies as deps_module
     from app.jobs import service as jobs_service
+    from app.models.diagnostics import GpuBackend
     from app.models.settings import Settings
 
-    settings = Settings(data_dir=str(tmp_data_dir / "data"))
+    settings = Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
     sf = deps_module.session_factory
     assert sf is not None
 

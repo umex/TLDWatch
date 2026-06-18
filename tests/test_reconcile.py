@@ -22,13 +22,14 @@ from app.api import dependencies as deps_module
 from app.jobs.manifest import empty_manifest, read_manifest, write_manifest
 from app.jobs.reconcile import reconcile_all
 from app.jobs.service import create_job
+from app.models.diagnostics import GpuBackend
 from app.models.job import ManifestPatch
 from app.models.settings import Settings
 from app.storage.fs import ensure_job_dir, job_dir, manifest_path
 
 
 def _settings(tmp_data_dir: Path) -> Settings:
-    return Settings(data_dir=str(tmp_data_dir / "data"))
+    return Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
 
 
 def _session_factory():

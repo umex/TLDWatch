@@ -29,6 +29,7 @@ from app.jobs.manifest import (
 )
 from app.models.job import ManifestPatch
 from app.models.manifest import JobManifest
+from app.models.diagnostics import GpuBackend
 from app.models.settings import Settings
 
 
@@ -41,7 +42,7 @@ async def test_roundtrip(
     assert resp.status_code == 201
     job_id = resp.json()["id"]
 
-    settings = Settings(data_dir=str(tmp_data_dir / "data"))
+    settings = Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
     manifest = await read_manifest(settings, job_id)
     assert manifest.job_id == job_id
     assert manifest.status == "queued"
@@ -60,14 +61,14 @@ async def test_roundtrip(
 @pytest.mark.asyncio
 async def test_missing_raises_filenotfound(tmp_data_dir: Path) -> None:
     """read_manifest raises FileNotFoundError for a job that has no manifest."""
-    settings = Settings(data_dir=str(tmp_data_dir / "data"))
+    settings = Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
     with pytest.raises(FileNotFoundError) as excinfo:
         await read_manifest(settings, "00000000-0000-0000-0000-000000000000")
     assert "00000000-0000-0000-0000-000000000000" in str(excinfo.value)
 
 
 def test_manifest_mtime_returns_none_for_missing(tmp_data_dir: Path) -> None:
-    settings = Settings(data_dir=str(tmp_data_dir / "data"))
+    settings = Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
     assert manifest_mtime(settings, "no-such-id") is None
 
 
@@ -86,7 +87,7 @@ async def test_update_stage_writes_manifest_first(
     resp = await client.post("/jobs", json={})
     assert resp.status_code == 201
     job_id = resp.json()["id"]
-    settings = Settings(data_dir=str(tmp_data_dir / "data"))
+    settings = Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
 
     # Get a session via the app's session factory.
     from app.api.dependencies import get_session
@@ -150,7 +151,7 @@ async def test_update_stage_projects_status_and_metadata(
 
     resp = await client.post("/jobs", json={})
     job_id = resp.json()["id"]
-    settings = Settings(data_dir=str(tmp_data_dir / "data"))
+    settings = Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
     sf = deps_module.session_factory
     assert sf is not None
 

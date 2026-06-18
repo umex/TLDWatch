@@ -15,6 +15,14 @@ dependencies = [
     "aiosqlite>=0.19",
     "aiofiles>=23",
     "python-dateutil>=2.8",
+    # Phase 2: HF token shim + VRAM probe + HTTP client. Promoted from
+    # dev to main so production installs get them. NO faster-whisper,
+    # llama-cpp-python, pyannote.audio, or torch — those arrive in
+    # their own phases (3, 8, 7) per RESEARCH Environment Availability
+    # and the CONTEXT domain boundary.
+    "huggingface_hub>=0.25",
+    "psutil>=5.9",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +30,7 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
     "httpx>=0.27",
+    "pytest-mock>=3.12",
 ]
 
 [tool.setuptools.packages.find]

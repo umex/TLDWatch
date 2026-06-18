@@ -13,6 +13,7 @@ from app.jobs.resume import (
     infer_resume_point,
     is_stage_complete,
 )
+from app.models.diagnostics import GpuBackend
 from app.models.manifest import JobManifest
 from app.models.settings import Settings
 from app.models.summary import SummaryKind
@@ -25,7 +26,7 @@ from app.storage.fs import (
 
 
 def _settings(tmp_data_dir: Path) -> Settings:
-    return Settings(data_dir=str(tmp_data_dir / "data"))
+    return Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,7 @@ import pytest_asyncio
 
 from app.api.dependencies import configure
 from app.main import app
+from app.models.diagnostics import GpuBackend
 from app.models.settings import Settings
 from app.storage.fs import bootstrap_settings_path
 
@@ -45,9 +46,16 @@ def tmp_data_dir(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     # Write the bootstrap settings file inside the temp project root.
     # The file is the serialisation of the :class:`Settings` Pydantic
     # model; ``data_dir`` is the ABSOLUTE path of the data dir.
+    # Phase 2: the model now has a required ``backend`` field (D-08);
+    # the fixture writes a Phase 2-shaped file with ``backend=CPU`` and
+    # all the new field defaults so the lifespan does NOT re-run the
+    # first-boot detect on every test boot.
     settings_path = data_dir / "settings.json"
     settings_path.write_text(
-        Settings(data_dir=str(data_dir.resolve())).model_dump_json(),
+        Settings(
+            data_dir=str(data_dir.resolve()),
+            backend=GpuBackend.CPU,
+        ).model_dump_json(),
         encoding="utf-8",
     )
 

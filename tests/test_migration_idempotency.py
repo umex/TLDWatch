@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from app.models.diagnostics import GpuBackend
 from app.models.settings import Settings
 from app.storage.db import apply_migrations, make_engine
 
@@ -24,7 +25,7 @@ from app.storage.db import apply_migrations, make_engine
 async def test_apply_migrations_three_times() -> None:
     """apply_migrations is idempotent across three consecutive calls."""
     td = Path(tempfile.mkdtemp(prefix="tan-mig-"))
-    s = Settings(data_dir=str(td))
+    s = Settings(data_dir=str(td), backend=GpuBackend.CPU)
     e = make_engine(s)
 
     # First call applies all 7 migrations.
@@ -54,7 +55,7 @@ async def test_apply_migrations_recovers_missing_version_row() -> None:
     row was never recorded, a re-run of apply_migrations records the
     missing version row (T9 all-duplicate-column path)."""
     td = Path(tempfile.mkdtemp(prefix="tan-mig-partial-"))
-    s = Settings(data_dir=str(td))
+    s = Settings(data_dir=str(td), backend=GpuBackend.CPU)
     e = make_engine(s)
 
     await apply_migrations(e)

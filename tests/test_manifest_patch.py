@@ -19,12 +19,13 @@ from pydantic import ValidationError
 from app.api import dependencies as deps_module
 from app.jobs.manifest import read_manifest, update_stage
 from app.jobs.service import get_job
+from app.models.diagnostics import GpuBackend
 from app.models.job import ManifestPatch, StageUpdateRequest
 from app.models.settings import Settings
 
 
 def _settings(tmp_data_dir: Path) -> Settings:
-    return Settings(data_dir=str(tmp_data_dir / "data"))
+    return Settings(data_dir=str(tmp_data_dir / "data"), backend=GpuBackend.CPU)
 
 
 def _session_factory():

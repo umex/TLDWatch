@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
+from app.models.diagnostics import GpuBackend
 from app.models.settings import Settings
 from app.storage.db import apply_migrations, make_engine
 
@@ -23,7 +24,7 @@ from app.storage.db import apply_migrations, make_engine
 async def test_wal_on_two_connections() -> None:
     """WAL is set on every distinct connection, not just the first."""
     td = Path(tempfile.mkdtemp(prefix="tan-wal-"))
-    s = Settings(data_dir=str(td))
+    s = Settings(data_dir=str(td), backend=GpuBackend.CPU)
     e = make_engine(s)
     await apply_migrations(e)
 
