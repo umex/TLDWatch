@@ -164,13 +164,16 @@ async def apply_update(patch: UpdateSettingsRequest) -> tuple[Settings, bool]:
       unchanged current; the X-Restart-Required header is the
       explicit signal that a restart is needed.
     - On a non-restart change (omitted ``data_dir`` or set to the
-      current value, OR a hot-swap of any Phase 2 field): drop any
-      prior pending slot, write the FULL new model to disk
-      (so ``quality_preset`` / ``hf_token`` / ``concurrent_models`` /
-      ``vram_budget_fraction`` / ``per_category_overrides`` hot-swaps
-      persist — Phase 2 D-08), and swap ``_State.settings`` to the
-      new model. The on-disk file is the serialization of the new
-      model (D-14: model is source of truth).
+      current value, OR a hot-swap of any Phase 2 field): write the
+      FULL new model to disk (so ``quality_preset`` / ``hf_token`` /
+      ``concurrent_models`` / ``vram_budget_fraction`` /
+      ``per_category_overrides`` hot-swaps persist — Phase 2 D-08),
+      PRESERVE any prior pending restart-required ``data_dir`` change
+      (WR-05: re-attach the pending slot to the disk dict and keep
+      ``_State.pending`` so the next boot's ``apply_pending`` still
+      installs it), and swap ``_State.settings`` to the new model. The
+      on-disk file is the serialization of the new model (D-14: model
+      is source of truth).
 
     Ordering: build the new model -> write the updated disk dict
     (atomic) -> on success update in-memory state. A disk-write
@@ -206,10 +209,16 @@ async def apply_update(patch: UpdateSettingsRequest) -> tuple[Settings, bool]:
         return existing, True
 
     # Non-restart change: write the FULL new model to disk (so Phase 2
-    # hot-swap fields persist), drop any prior pending, swap in-memory.
+    # hot-swap fields persist) and swap in-memory. PRESERVE any prior
+    # pending restart-required data_dir change across this hot-swap
+    # (WR-05): dropping it here would silently lose the user's queued
+    # data_dir move. Re-attach the pending slot to the disk dict and
+    # keep ``_State.pending`` intact so the next boot's apply_pending
+    # still installs it.
     disk = new.model_dump()
+    if _State.pending is not None:
+        disk[_PENDING_KEY] = _State.pending.model_dump()
     await _write_disk_dict(target_path, disk)
-    _State.pending = None
     _State.settings = new
     return new, False
 
