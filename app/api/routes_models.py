@@ -52,6 +52,7 @@ from app.models.manager import (
 from app.models.presets import active_model_set
 from app.models.registry import get_category, get_spec, list_specs
 from app.models.settings import Settings
+from app.storage.models_dir import spec_file_path
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -96,8 +97,17 @@ async def list_models(
     )
 
 
-async def _run_download(spec: ModelSpec, category, id: str) -> None:
-    """Background task: call ``ensure_downloaded`` and update ``_in_flight``."""
+async def _run_download(
+    spec: ModelSpec, category, id: str, settings: Settings
+) -> None:
+    """Background task: call ``ensure_downloaded`` and update ``_in_flight``.
+
+    Polls the on-disk partial file size while the download runs so
+    ``progress.bytes_done`` reflects byte-level progress (WR-02). HF
+    Hub writes to ``<filename>.incomplete`` next to the target during
+    download; we sum the target and any matching ``*.incomplete``
+    files in the target's directory.
+    """
     manager = get_manager()
     progress = _in_flight.setdefault(
         id,
@@ -105,6 +115,39 @@ async def _run_download(spec: ModelSpec, category, id: str) -> None:
     )
     progress.state = "running"
     progress.bytes_total = spec.expected_size_bytes
+    target = spec_file_path(settings, category, spec)
+
+    async def _poll_bytes() -> None:
+        import time
+
+        while progress.state == "running":
+            try:
+                total = 0
+                if target.exists():
+                    total += target.stat().st_size
+                parent = target.parent
+                if parent.exists():
+                    stem = target.name
+                    for p in parent.glob(f"{stem}*.incomplete"):
+                        try:
+                            total += p.stat().st_size
+                        except OSError:
+                            pass
+                    # huggingface_hub may stage under .cache/huggingface/download
+                    cache_dl = parent / ".cache" / "huggingface" / "download"
+                    if cache_dl.exists():
+                        for p in cache_dl.glob(f"{stem}*.incomplete"):
+                            try:
+                                total += p.stat().st_size
+                            except OSError:
+                                pass
+                progress.bytes_done = total
+            except OSError:
+                pass
+            await asyncio.sleep(0.5)
+            _ = time  # keep import local to the closure
+
+    poll_task = asyncio.create_task(_poll_bytes())
     try:
         await manager.ensure_downloaded(spec, category)
         progress.state = "done"
@@ -121,6 +164,12 @@ async def _run_download(spec: ModelSpec, category, id: str) -> None:
     except Exception as exc:  # noqa: BLE001
         progress.state = "failed"
         progress.message = str(exc)
+    finally:
+        poll_task.cancel()
+        try:
+            await poll_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
 
 
 @router.post(
@@ -156,7 +205,7 @@ async def download_model(
         state="queued",
         bytes_total=spec.expected_size_bytes,
     )
-    asyncio.create_task(_run_download(spec, category, id))
+    asyncio.create_task(_run_download(spec, category, id, settings))
     return DownloadTaskResponse(
         task_id=task_id, status_url=f"/models/{id}/status"
     )
@@ -184,15 +233,25 @@ async def download_progress_sse(
         import time
 
         last_state = None
+        last_bytes = None
+        last_emit = 0.0
         heartbeat = 0.0
         while True:
             progress = _in_flight.get(id)
             if progress is not None:
                 current_state = progress.state
-                if current_state != last_state:
+                current_bytes = progress.bytes_done
+                # Emit on state change, or on bytes_done change throttled
+                # to >= 0.5s between frames (WR-02 byte-level progress).
+                now = time.monotonic()
+                state_changed = current_state != last_state
+                bytes_changed = current_bytes != last_bytes
+                if state_changed or (bytes_changed and now - last_emit >= 0.5):
                     payload = progress.model_dump_json()
                     yield f"event: progress\ndata: {payload}\n\n"
                     last_state = current_state
+                    last_bytes = current_bytes
+                    last_emit = now
                     if current_state in ("done", "failed"):
                         return
             # Heartbeat every ~5 seconds so a slow consumer does not
