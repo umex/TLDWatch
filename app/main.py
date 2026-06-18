@@ -151,7 +151,25 @@ async def lifespan(app: FastAPI):
     except Exception:  # pragma: no cover - defensive logging only
         logger.exception("Could not compute default data_dir for override check")
 
-    # Ensure the configured data directory exists.
+    # H1: install any pending restart-required change as the in-memory
+    # current BEFORE building the engine. The pending value was written
+    # to disk on a prior PATCH /settings with a restart-required
+    # data_dir change. apply_pending rewrites the disk file without the
+    # pending key so the next boot does not re-apply. Refreshing the
+    # local ``settings`` here (and building the engine AFTER) ensures
+    # the SQLAlchemy engine and the ModelManager both point at the NEW
+    # data_dir, matching what ``settings_service.current()`` reports.
+    old_data_dir = settings.data_dir
+    if settings_service.apply_pending():
+        settings = settings_service.current()
+        logger.info(
+            "applied pending settings on boot: data_dir changed from %s to %s",
+            old_data_dir,
+            settings.data_dir,
+        )
+
+    # Ensure the configured data directory exists (now using the
+    # applied value).
     Path(settings.data_dir).mkdir(parents=True, exist_ok=True)
 
     engine = make_engine(settings)
@@ -159,20 +177,6 @@ async def lifespan(app: FastAPI):
 
     session_factory = make_sessionmaker(engine)
     configure(session_factory, settings)
-
-    # H1: install any pending restart-required change as the in-memory
-    # current. The pending value was written to disk on a prior PATCH
-    # /settings with a restart-required data_dir change. apply_pending
-    # rewrites the disk file without the pending key so the next boot
-    # does not re-apply.
-    old_data_dir = settings.data_dir
-    if settings_service.apply_pending():
-        new_settings = settings_service.current()
-        logger.info(
-            "applied pending settings on boot: data_dir changed from %s to %s",
-            old_data_dir,
-            new_settings.data_dir,
-        )
 
     # Phase 2: install an empty ManagerState so ``GET /diagnostics/vram``
     # returns ``loaded=[]`` from boot. 02-02's ``configure_manager`` will
