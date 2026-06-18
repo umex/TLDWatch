@@ -50,7 +50,7 @@ from app.models.manager import (
     get_manager,
 )
 from app.models.presets import active_model_set
-from app.models.registry import get_category, get_spec, list_specs
+from app.models.registry import REGISTRY, get_category, get_spec, list_specs
 from app.models.settings import Settings
 from app.storage.models_dir import spec_file_path
 
@@ -68,7 +68,11 @@ def _resolve(id: str) -> tuple[ModelSpec, "object"]:
     except KeyError as exc:
         raise HTTPException(
             status_code=404,
-            detail={"error": "unknown_model", "id": id, "available": sorted(str(k) for k in exc.args)},
+            detail={
+                "error": "unknown_model",
+                "id": id,
+                "available": sorted(REGISTRY.keys()),
+            },
         ) from exc
     try:
         category = get_category(id)
