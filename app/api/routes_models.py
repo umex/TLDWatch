@@ -132,8 +132,24 @@ async def download_model(
     id: str,
     settings: Settings = Depends(get_settings),
 ) -> DownloadTaskResponse:
-    """Kick off an async download for ``id`` (D-01 on-demand)."""
+    """Kick off an async download for ``id`` (D-01 on-demand).
+
+    Deduplicates in-flight downloads: if a task for ``id`` is already
+    ``queued`` or ``running``, returns 409 instead of overwriting the
+    progress entry and spawning a racing second background task.
+    """
     spec, category = _resolve(id)
+    existing = _in_flight.get(id)
+    if existing is not None and existing.state in ("queued", "running"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "download_in_flight",
+                "id": id,
+                "state": existing.state,
+                "status_url": f"/models/{id}/status",
+            },
+        )
     task_id = str(uuid.uuid4())
     _in_flight[id] = DownloadProgress(
         model_id=spec.repo_id,
