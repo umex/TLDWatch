@@ -7,18 +7,23 @@ for the service. It:
    :func:`app.storage.fs.bootstrap_settings_path` (the file lives
    next to the backend executable and is the SAME absolute path for
    every run - patching ``data_dir`` does not move it).
-2. On first boot, atomically writes an initial ``data/settings.json``
-   whose ``data_dir`` value is the absolute path of the bootstrap
-   data directory (this is the fix for the circular data_dir
-   bootstrap, Codex HIGH).
-3. Loads and validates the file via the :class:`Settings` Pydantic
-   model (D-14, D-15).
-4. Creates the data directory, builds the SQLAlchemy async engine
+2. Phase 2: if the settings file is missing OR fails to validate
+   (a Phase 1 install has no ``backend`` field, D-08), runs the
+   two-stage GPU detect + burn test, builds a full Settings with
+   the new fields, and writes it atomically (D-04 Phase-1 helper).
+   A SUBSEQUENT boot skips the detect; the user re-runs it via
+   ``POST /diagnostics/gpu-burn``.
+3. Creates the data directory, builds the SQLAlchemy async engine
    with a per-connection WAL listener, applies any pending
    migrations, and fails to start on any migration error (D-08).
-5. Installs the session factory + settings on the request scope
+4. Installs the session factory + settings on the request scope
    via :func:`app.api.dependencies.configure`.
-6. On shutdown, disposes the engine so SQLite releases the file.
+5. Phase 2: installs an empty :class:`ManagerState` so
+   ``GET /diagnostics/vram`` returns ``loaded=[]`` from boot
+   (02-02's ``configure_manager`` swaps this).
+6. Reconciles per-job folders against the DB; refuses to start on
+   failure (D-08 posture).
+7. On shutdown, disposes the engine so SQLite releases the file.
 
 The FastAPI app itself is built outside the lifespan so routers
 register at import time (Codex MEDIUM). Middleware is added before
@@ -36,12 +41,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.dependencies import configure
+from app.api.routes_diagnostics import router as diagnostics_router
 from app.api.routes_health import router as health_router
 from app.api.routes_jobs import router as jobs_router
 from app.api.routes_settings import router as settings_router
+from app.models import (
+    BackendProbe,
+    GpuBurnResult,
+    HfTokenResult,
+    LoadedModelInfo,
+    ModelSet,
+    ModelSpec,
+    VRAMState,
+)
+from app.models import backend as backend_module
+from app.models.diagnostics import GpuBackend, ModelCategory, QualityPreset
 from app.models.settings import Settings
 from app.models.summary import Summary
 from app.models.transcript import Transcript, TranscriptSegment
+from app.models.vram import ManagerState, set_manager_state
 from app.settings import service as settings_service
 from app.storage.atomic import atomic_write_json
 from app.storage.db import apply_migrations, make_engine, make_sessionmaker
@@ -54,19 +72,62 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     bootstrap_path = bootstrap_settings_path()
     bootstrap_dir = bootstrap_path.parent
+    bootstrap_dir.mkdir(parents=True, exist_ok=True)
 
-    if not bootstrap_path.exists():
-        # First boot. The default ``data_dir`` is the ABSOLUTE path of
-        # the bootstrap directory so the data dir is decoupled from
-        # the process working directory (Codex HIGH fix).
-        default_data_dir = str(bootstrap_dir.resolve())
-        bootstrap_dir.mkdir(parents=True, exist_ok=True)
-        await atomic_write_json(
-            bootstrap_path, Settings(data_dir=default_data_dir).model_dump()
-        )
-        logger.info("Wrote initial settings file at %s", bootstrap_path)
+    # Phase 2: the Settings model now has a REQUIRED ``backend`` field
+    # (D-08). A Phase 1 fresh install has a settings.json with just
+    # ``data_dir`` (no backend) -- ``Settings.model_validate`` raises
+    # ``ValidationError`` on that file. We wrap the load in
+    # try/except: if it raises (or the file is missing), treat as
+    # "first boot" and run the two-stage detect + burn test, then
+    # build a full Settings with the new fields and write it
+    # atomically (D-04 Phase-1 helper). A SUBSEQUENT boot (the on-disk
+    # file already has ``backend``) skips the detect; the user re-runs
+    # it via ``POST /diagnostics/gpu-burn``.
+    settings: Settings | None = None
+    pending: Settings | None = None
+    if bootstrap_path.exists():
+        try:
+            settings, pending = settings_service.load_settings_from_disk(
+                bootstrap_path
+            )
+        except Exception as exc:
+            # A Phase 1 install (no ``backend`` field) raises
+            # ValidationError; a corrupt file raises ValueError / JSON
+            # error. Either way, fall through to the first-boot detect
+            # path which will write a clean Phase 2 file.
+            logger.info(
+                "existing settings file failed to validate (%s); "
+                "running first-boot GPU detect",
+                exc,
+            )
+            settings = None
 
-    settings, pending = settings_service.load_settings_from_disk(bootstrap_path)
+    if settings is None:
+        # First boot OR Phase 1 file without backend -- run detect +
+        # burn, then build a full Settings and persist it atomically.
+        try:
+            backend = await backend_module.detect()
+            probe = await backend_module.burn_test(backend)
+            default_data_dir = str(bootstrap_dir.resolve())
+            settings = Settings(
+                data_dir=default_data_dir,
+                backend=backend,
+                backend_probe=probe,
+            )
+            await atomic_write_json(bootstrap_path, settings.model_dump())
+            # Record the path so apply_update / re-detect write back
+            # to the same file.
+            settings_service._State.path = bootstrap_path  # noqa: SLF001
+            settings_service.configure(settings)
+            logger.info(
+                "Wrote initial backend settings: backend=%s device_name=%s",
+                backend.value,
+                probe.device_name,
+            )
+        except Exception:
+            logger.exception("first-run GPU detect failed; refusing to start")
+            raise
 
     # Surface a manual override at boot (does not block startup).
     try:
@@ -102,6 +163,11 @@ async def lifespan(app: FastAPI):
             old_data_dir,
             new_settings.data_dir,
         )
+
+    # Phase 2: install an empty ManagerState so ``GET /diagnostics/vram``
+    # returns ``loaded=[]`` from boot. 02-02's ``configure_manager`` will
+    # swap this for the model manager's live state.
+    set_manager_state(ManagerState(live_vram_bytes={}))
 
     # Startup reconciliation: walk every per-job folder and UPDATE
     # any DB row that has drifted from its manifest (Codex HIGH #1
@@ -147,13 +213,15 @@ app = FastAPI(title="TranscriptionAndNotes", version="0.1.0", lifespan=lifespan)
 # ``components.schemas``; without this, Pydantic only registers
 # models that are reachable from a route handler.
 #
-# See Plan 01-02 success criteria: TranscriptSegment, Summary,
-# Settings, UpdateSettingsRequest must all appear in
-# components.schemas.
+# Plan 01-02 success criteria: TranscriptSegment, Transcript, Summary,
+# Settings, UpdateSettingsRequest must all appear in components.schemas.
 #
 # Plan 01-03 adds the new internal-mutator request/response models
 # (StageUpdateRequest, StaleCheckResponse, ManifestPatch) so the
 # OpenAPI schema carries the full per-job control surface.
+#
+# Plan 02-01 adds the Phase 2 diagnostics + model-manager types so the
+# OpenAPI schema exposes them for the React settings panel (Phase 5/10).
 from app.models.job import ManifestPatch, StageUpdateRequest, StaleCheckResponse
 from app.models.manifest import JobManifest
 
@@ -165,6 +233,14 @@ _EXTRA_OPENAPI_MODELS = [
     ManifestPatch,
     StageUpdateRequest,
     StaleCheckResponse,
+    # Phase 2 diagnostics + model-manager types (02-01).
+    BackendProbe,
+    GpuBurnResult,
+    VRAMState,
+    LoadedModelInfo,
+    HfTokenResult,
+    ModelSpec,
+    ModelSet,
 ]
 
 
@@ -211,3 +287,4 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(jobs_router)
 app.include_router(settings_router)
+app.include_router(diagnostics_router)

@@ -155,25 +155,26 @@ async def apply_update(patch: UpdateSettingsRequest) -> tuple[Settings, bool]:
     that omits ``data_dir`` (or sets the same value) is not
     restart-required.
 
-    Behavior (Plan 01-04 H1):
+    Behavior (Plan 01-04 H1 + Phase 2 hot-swap):
 
-    - On a restart-required change: persist the new value to disk
-      under the ``pending`` sibling key (the active ``data_dir`` stays
-      at the BOOT value). Set ``_State.pending`` to the new model.
-      Do NOT swap ``_State.settings``. The returned in-memory value
-      is the unchanged current; the X-Restart-Required header is the
+    - On a restart-required change: persist the new model under the
+      ``pending`` sibling key (the active settings stay at the BOOT
+      value). Set ``_State.pending`` to the new model. Do NOT swap
+      ``_State.settings``. The returned in-memory value is the
+      unchanged current; the X-Restart-Required header is the
       explicit signal that a restart is needed.
     - On a non-restart change (omitted ``data_dir`` or set to the
-      current value): drop any prior pending slot from disk and from
-      ``_State.pending``, swap ``_State.settings`` to the new model
-      (the existing Phase 1 behavior - Phase 1 has only ``data_dir``,
-      so a non-restart change is effectively a no-op but the disk
-      rewrite is still atomic).
+      current value, OR a hot-swap of any Phase 2 field): drop any
+      prior pending slot, write the FULL new model to disk
+      (so ``quality_preset`` / ``hf_token`` / ``concurrent_models`` /
+      ``vram_budget_fraction`` / ``per_category_overrides`` hot-swaps
+      persist — Phase 2 D-08), and swap ``_State.settings`` to the
+      new model. The on-disk file is the serialization of the new
+      model (D-14: model is source of truth).
 
-    Ordering: build the new model -> read current disk dict -> write
-    the updated disk dict (atomic) -> on success update in-memory
-    state. A disk-write failure leaves the in-memory state untouched
-    and re-raises.
+    Ordering: build the new model -> write the updated disk dict
+    (atomic) -> on success update in-memory state. A disk-write
+    failure leaves the in-memory state untouched and re-raises.
     """
     existing = current()
     # ``exclude_unset=True`` gives us ONLY the fields the client
@@ -187,19 +188,15 @@ async def apply_update(patch: UpdateSettingsRequest) -> tuple[Settings, bool]:
         "data_dir" in patch.model_fields_set and new.data_dir != existing.data_dir
     )
 
-    # Read the current disk dict so we preserve unknown keys (defensive
-    # forward-compatibility). If the file does not exist we start
-    # from a minimal dict.
     target_path = _State.path or _default_settings_path()
-    if target_path.exists():
-        disk = _read_disk_dict(target_path)
-    else:
-        disk = {}
 
     if restart_required:
-        # H1: persist the new value under the pending key; leave the
-        # active data_dir at the BOOT value.
-        disk["data_dir"] = existing.data_dir
+        # H1: persist the full new model under the pending key; the
+        # active settings stay at the BOOT model. We write the full
+        # existing.model_dump() as the active dict (not the raw disk
+        # dict) so the on-disk file is the canonical serialization of
+        # the active Settings (D-14).
+        disk = existing.model_dump()
         disk[_PENDING_KEY] = new.model_dump()
         await _write_disk_dict(target_path, disk)
         _State.pending = new
@@ -208,9 +205,9 @@ async def apply_update(patch: UpdateSettingsRequest) -> tuple[Settings, bool]:
         # installs the new value.
         return existing, True
 
-    # Non-restart change: drop any prior pending, swap in-memory state.
-    disk["data_dir"] = new.data_dir
-    disk.pop(_PENDING_KEY, None)
+    # Non-restart change: write the FULL new model to disk (so Phase 2
+    # hot-swap fields persist), drop any prior pending, swap in-memory.
+    disk = new.model_dump()
     await _write_disk_dict(target_path, disk)
     _State.pending = None
     _State.settings = new
@@ -223,12 +220,15 @@ def apply_pending() -> bool:
     Called by the lifespan AFTER :func:`load_settings_from_disk` and
     the engine/session factory are built. If ``_State.pending`` is
     non-None, the value is installed as ``_State.settings`` and the
-    pending key is removed from the on-disk JSON. Returns True if a
+    on-disk file is rewritten as the canonical serialization of the
+    new model (D-14) without the pending key. Returns True if a
     pending change was installed, False otherwise.
 
-    The on-disk rewrite uses :func:`_read_disk_dict` /
-    :func:`atomic_write_json` directly (not :func:`save_settings_to_disk`)
-    so the dict structure is preserved.
+    The on-disk rewrite writes the FULL ``new.model_dump()`` (not just
+    ``data_dir``) so Phase 2 fields carried in the pending model
+    persist cleanly. Synchronous write: ``apply_pending`` is called
+    from the lifespan on the event loop but is not itself async; the
+    file is small and ``atomic_write_json`` is async-only.
     """
     if _State.pending is None:
         return False
@@ -236,34 +236,27 @@ def apply_pending() -> bool:
     _State.settings = new
     _State.pending = None
     target_path = _State.path or _default_settings_path()
-    # Rewrite the disk file without the pending key.
-    if target_path.exists():
-        disk = _read_disk_dict(target_path)
-        disk.pop(_PENDING_KEY, None)
-        disk["data_dir"] = new.data_dir
-        # Synchronous write: apply_pending is called from the lifespan
-        # on the event loop, but we need a sync path because the
-        # function itself is not async. Use the sync json/replace
-        # pattern via Path.write_text + os.replace; the file is small
-        # and the atomic_write_json helper is async-only.
-        import os
-        import tempfile
+    # Rewrite the disk file as the canonical serialization of the
+    # new model (no pending key).
+    disk = new.model_dump()
+    import os
+    import tempfile
 
-        tmp_fd, tmp_path = tempfile.mkstemp(
-            prefix=".tmp_", dir=str(target_path.parent)
-        )
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        prefix=".tmp_", dir=str(target_path.parent)
+    )
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+            json.dump(disk, fh, indent=2, sort_keys=True)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, target_path)
+    except BaseException:
         try:
-            with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
-                json.dump(disk, fh, indent=2, sort_keys=True)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp_path, target_path)
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except FileNotFoundError:
-                pass
-            raise
+            os.unlink(tmp_path)
+        except FileNotFoundError:
+            pass
+        raise
     return True
 
 

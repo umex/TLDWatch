@@ -25,8 +25,21 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 @router.get("", response_model=Settings)
 def get_settings() -> Settings:
-    """Return the current :class:`Settings` (lax output)."""
-    return current()
+    """Return the current :class:`Settings` (lax output).
+
+    D-05: ``hf_token`` is NEVER returned in the response regardless of
+    ``?reveal=``. The on-disk file holds the base64-encoded value; the
+    response nulls it so a stray ``GET /settings`` does not leak the
+    token to a caller reading the body. We build the response body
+    from ``current().model_dump()`` and explicitly null ``hf_token``
+    before returning; ``response_model=Settings`` re-validates the
+    dict (the ``hf_token`` field_validator passes ``None`` through, and
+    the field_serializer returns ``None`` for ``None``), so the wire
+    body carries ``"hf_token": null``.
+    """
+    body = current().model_dump()
+    body["hf_token"] = None
+    return body  # type: ignore[return-value]
 
 
 @router.patch("", response_model=Settings)
