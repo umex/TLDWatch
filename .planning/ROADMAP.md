@@ -72,7 +72,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion; 02-02 and 02-03 run in parallel)*
 
 - [ ] 02-02: Model manager (download, verify, lazy load, idle unload, VRAM probe) (autonomous; HW-02, HW-04, HW-07, HW-09)
-- [ ] 02-03: ROCm-on-Windows spike (whisper.cpp ROCm build + llama.cpp HIP build, document fallback) (autonomous; HW-03)
+- [ ] 02-03: ROCm-on-Windows spike (whisper.cpp ROCm build + llama.cpp HIP build, document fallback) (non-autonomous; HW-03)
 
 ### Phase 3: STT Adapter + Audio Chunker + Standalone CLI
 
