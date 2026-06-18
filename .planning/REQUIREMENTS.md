@@ -62,7 +62,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Hardware & Models
 
 - [ ] **HW-01**: Front-end (React) and back-end (Python) are separated and communicate via a job API
-- [ ] **HW-02**: Transcription, diarization, and LLM summarization all run on local models on the user's GPU
+- [x] **HW-02**: Transcription, diarization, and LLM summarization all run on local models on the user's GPU
 - [x] **HW-03**: App auto-detects GPU (NVIDIA CUDA vs AMD ROCm vs CPU fallback) on first run and configures backends silently
 - [x] **HW-04**: App downloads its own models on first run; user can swap model variants in settings
 - [ ] **HW-05**: User can configure a "quality preset" (e.g. small / balanced / large) in settings; the app picks compatible model variants automatically
@@ -166,11 +166,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HW-09 | Phase 2 | Complete (02-02) |
 
 **Coverage:**
+
 - v1 requirements: 38 total
 - Mapped to phases: 38
 - Unmapped: 0 ✓
 
 **Notes from roadmap creation (2026-06-11):**
+
 - Mode is `mvp` — each phase is a vertical slice delivering observable user-visible or testable system behavior end-to-end, not a horizontal layer.
 - Phase 5 owns the 3-pane UI shell (history | transcript | summary) with NO embedded video player; active-line highlight is per the v1 spec (local files only).
 - TRANS-08 (YouTube timestamp link-out) is owned by Phase 6, paired with the YouTube ingest pipeline. There is no click-to-seek on local files in v1 — UI-03 highlight is scroll-position based.

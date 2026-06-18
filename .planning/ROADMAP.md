@@ -258,7 +258,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Back-end Skeleton + Storage + Data Layout | 3/3 | Complete   | 2026-06-14 |
-| 2. GPU Backend Detection + Model Manager | 3/3 | Complete   | 2026-06-18 |
+| 2. GPU Backend Detection + Model Manager | 3/3 | Complete    | 2026-06-18 |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 0/3 | Not started | - |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 0/3 | Not started | - |
 | 5. Local File Ingest + History UI + 3-Pane Layout | 0/3 | Not started | - |
