@@ -7,7 +7,7 @@ A local-first web app that turns any video (local file, YouTube URL, or YouTube 
 ## Phases
 
 - [x] **Phase 1: Back-end Skeleton + Storage + Data Layout** - FastAPI service, SQLite WAL, per-job filesystem layout, Pydantic schema, OpenAPI surface; the foundation every other component imports. (completed 2026-06-14)
-- [ ] **Phase 2: GPU Backend Detection + Model Manager** - First-run CUDA/ROCm/CPU detection, model download with SHA verification, lazy load + idle unload, single-model VRAM discipline.
+- [x] **Phase 2: GPU Backend Detection + Model Manager** - First-run CUDA/ROCm/CPU detection, model download with SHA verification, lazy load + idle unload, single-model VRAM discipline. (completed 2026-06-18)
 - [ ] **Phase 3: STT Adapter + Audio Chunker + Standalone CLI** - faster-whisper adapter, long-audio chunker with OOM fallback, language auto-detect, a runnable CLI that proves the GPU abstraction end-to-end.
 - [ ] **Phase 4: Job Orchestrator + Persistent Queue + WebSocket Progress** - In-process job runner, SQLite-backed queue with restart persistence, state machine with file-as-truth, real-time progress broadcast.
 - [ ] **Phase 5: Local File Ingest + History UI + 3-Pane Layout** - Streaming drag-and-drop upload, history list (left pane), transcript view (middle), summary view (right), active-line highlight, no embedded video.
@@ -72,7 +72,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion; 02-02 and 02-03 run in parallel)*
 
 - [x] 02-02: Model manager (download, verify, lazy load, idle unload, VRAM probe) (autonomous; HW-02, HW-04, HW-07, HW-09)
-- [ ] 02-03: ROCm-on-Windows spike (whisper.cpp ROCm build + llama.cpp HIP build, document fallback) (non-autonomous; HW-03)
+- [x] 02-03: ROCm-on-Windows spike (whisper.cpp ROCm build + llama.cpp HIP build, document fallback) (non-autonomous; HW-03)
 
 ### Phase 3: STT Adapter + Audio Chunker + Standalone CLI
 
@@ -258,7 +258,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Back-end Skeleton + Storage + Data Layout | 3/3 | Complete   | 2026-06-14 |
-| 2. GPU Backend Detection + Model Manager | 0/3 | Planned (3 plans) | - |
+| 2. GPU Backend Detection + Model Manager | 3/3 | Complete   | 2026-06-18 |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 0/3 | Not started | - |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 0/3 | Not started | - |
 | 5. Local File Ingest + History UI + 3-Pane Layout | 0/3 | Not started | - |
