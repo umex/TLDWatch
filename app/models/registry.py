@@ -33,14 +33,20 @@ _BALANCED_STT = ModelSpec(
     repo_id="Systran/faster-whisper-large-v3",
     file=None,
     revision=None,
-    expected_size_bytes=None,
+    # ~3.0 GB CTranslate2 large-v3 weights. Approximation for VRAM
+    # budget math only (NOT an integrity check) -- SC-4 budget gate is
+    # otherwise bypassed when this is None (WR-04).
+    expected_size_bytes=3_000_000_000,
     expected_sha256=None,
 )
 _BALANCED_DIARIZE = ModelSpec(
     repo_id="pyannote/speaker-diarization-3.1",
     file=None,
     revision=None,
-    expected_size_bytes=None,
+    # ~90 MB pyannote segmentation model. Approximation for VRAM
+    # budget math only (NOT an integrity check) -- SC-4 budget gate is
+    # otherwise bypassed when this is None (WR-04).
+    expected_size_bytes=90_000_000,
     expected_sha256=None,
 )
 _BALANCED_LLM = ModelSpec(
@@ -57,7 +63,10 @@ _SMALL_STT = ModelSpec(
     repo_id="Systran/faster-whisper-small",
     file=None,
     revision=None,
-    expected_size_bytes=None,
+    # ~1.0 GB CTranslate2 small weights. Approximation for VRAM budget
+    # math only (NOT an integrity check) -- SC-4 budget gate is
+    # otherwise bypassed when this is None (WR-04).
+    expected_size_bytes=1_000_000_000,
     expected_sha256=None,
 )
 _SMALL_LLM = ModelSpec(
