@@ -63,4 +63,10 @@ async def patch_settings(
     result, restart_required = await apply_update(payload)
     if restart_required:
         response.headers["X-Restart-Required"] = "true"
-    return result
+    # D-05: ``hf_token`` is NEVER returned in the response, mirroring
+    # ``get_settings``. Without this, ``response_model=Settings``
+    # serializes the in-memory token via the base64 field_serializer
+    # and leaks the (trivially decodable) credential in the body.
+    body = result.model_dump()
+    body["hf_token"] = None
+    return body  # type: ignore[return-value]
