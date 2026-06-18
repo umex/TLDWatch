@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 02 plan 02-01 complete
-last_updated: "2026-06-18T20:05:00.000Z"
-last_activity: 2026-06-18 -- Phase 02 plan 02-01 executed (SC-1 + D-05/D-06/D-08/D-09/D-15 honored; 134 tests green)
+stopped_at: Phase 02 plan 02-02 complete; next 02-03 ROCm spike
+last_updated: "2026-06-18T20:21:37.000Z"
+last_activity: 2026-06-18 -- Phase 02 plan 02-02 executed (model manager + 6 /models routes; SC-2/3/4/5 + D-01/03/04/09 honored; 151 tests green)
 progress:
   total_phases: 10
   completed_phases: 1
   total_plans: 7
-  completed_plans: 5
-  percent: 12
+  completed_plans: 6
+  percent: 14
 ---
 
 # Project State
@@ -26,30 +26,30 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 02 (gpu-backend-detection-model-manager) — EXECUTING
-Plan: 2 of 3 (02-01 complete; next: 02-02 model manager)
+Plan: 3 of 3 (02-01 complete, 02-02 complete; next: 02-03 ROCm-on-Windows spike — non-autonomous, user-run)
 Status: Executing Phase 02
-Last activity: 2026-06-18 -- Phase 02 plan 02-01 executed (SC-1 + D-05/D-06/D-08/D-09/D-15 honored; 134 tests green)
+Last activity: 2026-06-18 -- Phase 02 plan 02-02 executed (model manager + 6 /models routes; SC-2/3/4/5 + D-01/03/04/09 honored; 151 tests green)
 
-Progress: [█████░░░░░░░░] 12%
+Progress: [██████░░░░░░] 14%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 4
+- Total plans completed: 6
 - Average duration: — min
-- Total execution time: ~3.5 hours (Phase 01 plans 01..04, including UAT + gap-closure)
+- Total execution time: ~4 hours (Phase 01 plans 01..04 + Phase 02 plans 01..02)
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 4 | 4 | — |
-| 02 | 1 | ~25 min | — |
+| 02 | 2 | ~50 min | — |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01, 01-02, 01-03, 01-04, 02-01 (134 tests green after 02-01)
+- Last 5 plans: 01-02, 01-03, 01-04, 02-01, 02-02 (151 tests green after 02-02)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -64,9 +64,12 @@ Recent decisions affecting current work:
 - Roadmap uses 10 phases, mvp mode, standard granularity — derived from research/SUMMARY.md build-order rationale.
 - Project skill guidance loaded; project skills directory was absent in this run, so no per-skill rules were applied.
 - **Plan 01-04 (gap-closure):** `PATCH /settings` is restart-only via a `pending` slot in the on-disk JSON; the in-memory state is not swapped until the next boot (`apply_pending()` in the lifespan). `stage_to_status(stage, manifest)` is the single source of truth for the stage-to-status mapping; `update_stage` writes status + full metadata in a single UPDATE; `reconcile_all` projects the same columns on boot. `create_job` compensates the DB row on folder/manifest failure. `parse_stage_file` validates stage files against typed Pydantic models. `mark_stale` is a no-op on terminal rows. Migration runner records the version on the all-duplicate-column path.
-- **Plan 02-01 (GPU detect + settings wire-in):** `Settings` extended with 7 Phase 2 fields (D-08 declare-now); `backend: GpuBackend` is REQUIRED (no default) so a Phase 1 settings file triggers the first-boot detect path in the lifespan (`try/except` around `load_settings_from_disk` -> `await backend_module.detect()` + `burn_test()` -> atomic write). `hf_token` base64 on disk via `field_serializer` + `field_validator(mode="before")` (D-05); never returned in `GET /settings` (route nulls the body). `UpdateSettingsRequest` is all-optional (data_dir, hf_token, quality_preset, per_category_overrides, concurrent_models, vram_budget_fraction) with `extra="forbid"` (D-08 — backend/backend_probe NOT declared); a `model_validator` rejects empty PATCH and explicit-null data_dir; per-field `strict=False` on enum/nested-model fields so JSON coerces. `apply_update` rewritten to write the FULL `new.model_dump()` to disk (was only updating data_dir) so Phase 2 hot-swap fields persist. `probe_vram` implements the two-pool fix (torch.cuda.memory_allocated + sum(live_vram_bytes), Pitfall 2). `validate_token` four-state shim (D-05, Pitfall 3); `_head` extracted as module-level async seam for tests. `POST /diagnostics/gpu-burn` hot-swaps backend + backend_probe atomically (no X-Restart-Required; H1). 134 tests green (113 existing + 21 new).
+- **Plan 02-01 (GPU detect + settings wire-in):** `Settings` extended with 7 Phase 2 fields (D-08 declare-now); `backend: GpuBackend` is REQUIRED (no default) so a Phase 1 settings file triggers the first-boot detect path in the lifespan (`try/except` around `load_settings_from_disk` -> `await backend_module.detect()` + `burn_test()` -> atomic write). `hf_token` base64 on disk via `field_serializer` + `field_validator(mode="before")` (D-05); never returned in `GET /settings` (route nulls the body). `UpdateSettingsRequest` is all-optional with `extra="forbid"` (D-08 — backend/backend_probe NOT declared); a `model_validator` rejects empty PATCH and explicit-null data_dir; per-field `strict=False` on enum/nested-model fields so JSON coerces. `apply_update` rewritten to write the FULL `new.model_dump()` to disk (was only updating data_dir) so Phase 2 hot-swap fields persist. `probe_vram` implements the two-pool fix (Pitfall 2). `validate_token` four-state shim (D-05, Pitfall 3); `_head` extracted as module-level async seam for tests. `POST /diagnostics/gpu-burn` hot-swaps backend + backend_probe atomically (no X-Restart-Required; H1). 134 tests green (113 existing + 21 new).
+- **Plan 02-02 (model manager + model API):** `ModelManager` owns the lifecycle: `ensure_downloaded` lazy-imports `huggingface_hub.hf_hub_download` (boundary check — only `manager.py` + `hf_token.py` import `huggingface_hub`), size fast-path, SHA verify with bounded 1-retry (Pitfall 4), `GatedRepoError` -> `ModelGatedError` (Pitfall 3). `load` re-reads settings via a factory (H1 hot-swap), enforces D-04 (`concurrent_models=False` -> `ConcurrentModelRefused` 409), probes VRAM via `probe_vram` (Pitfall 2 two-pool fix), enforces the 85% budget gate (SC-4 -> `VramBudgetExceeded` 507), records the reservation in `ManagerState.live_vram_bytes` + `loaded_meta`, emits a structured JSON INFO log line (SC-2). `unload` idempotent (D-03, no timer); `unload_all` on lifespan teardown. 5 typed errors map to 507/409/403/500 in `routes_models`. `REGISTRY` (9 entries: 3 categories x 3 presets) + `PRESETS` (`active_model_set` resolver: override > preset, HW-06) + `app.storage.models_dir` (`repo_id` sandboxes `/` -> `--` per Pitfall 4). Six `/models` routes (GET, POST download 202, GET status, GET SSE, POST load, POST unload 204). `ManagerState.loaded_meta` typed as `dict[ModelCategory, Any]` to avoid a circular import with `app.models.manager`. HW-02 lifecycle delivered (actual GPU inference is Phase 3/7/8). 151 tests green (134 existing + 17 new). HW-04, HW-07, HW-09 marked complete; HW-02 pending actual inference in Phase 3/7/8.
 
 ### Pending Todos
+
+None yet.
 
 None yet.
 
@@ -94,9 +97,9 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-18T20:05:00.000Z
-Stopped at: Phase 02 plan 02-01 complete
-Resume file: .planning/phases/02-gpu-backend-detection-model-manager/02-01-SUMMARY.md
+Last session: 2026-06-18T20:21:37.000Z
+Stopped at: Phase 02 plan 02-02 complete; next 02-03 ROCm spike (non-autonomous, user-run)
+Resume file: .planning/phases/02-gpu-backend-detection-model-manager/02-02-SUMMARY.md
 
 ### Gap-closure wave (01-04) — closed
 

@@ -64,12 +64,12 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **HW-01**: Front-end (React) and back-end (Python) are separated and communicate via a job API
 - [ ] **HW-02**: Transcription, diarization, and LLM summarization all run on local models on the user's GPU
 - [x] **HW-03**: App auto-detects GPU (NVIDIA CUDA vs AMD ROCm vs CPU fallback) on first run and configures backends silently
-- [ ] **HW-04**: App downloads its own models on first run; user can swap model variants in settings
+- [x] **HW-04**: App downloads its own models on first run; user can swap model variants in settings
 - [ ] **HW-05**: User can configure a "quality preset" (e.g. small / balanced / large) in settings; the app picks compatible model variants automatically
 - [ ] **HW-06**: User can override the model selection per category (transcription / diarization / LLM) from a settings panel
-- [ ] **HW-07**: Default model set fits the 8 GB laptop VRAM budget
+- [x] **HW-07**: Default model set fits the 8 GB laptop VRAM budget
 - [ ] **HW-08**: User can opt into a larger model on the 16 GB desktop via settings
-- [ ] **HW-09**: Per-job VRAM discipline: models load on demand, unload when idle; no concurrent multi-model residency
+- [x] **HW-09**: Per-job VRAM discipline: models load on demand, unload when idle; no concurrent multi-model residency
 
 ## v2 Requirements
 
@@ -156,14 +156,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-02 | Phase 5 | Pending |
 | UI-03 | Phase 5 | Pending |
 | HW-01 | Phase 1 | Pending |
-| HW-02 | Phase 2 | Pending |
+| HW-02 | Phase 2 | Pending (lifecycle in 02-02; actual GPU inference in Phase 3/7/8) |
 | HW-03 | Phase 2 | Complete (02-01) |
-| HW-04 | Phase 2 | Pending |
+| HW-04 | Phase 2 | Complete (02-02) |
 | HW-05 | Phase 10 | Pending |
 | HW-06 | Phase 10 | Pending |
-| HW-07 | Phase 2 | Pending |
+| HW-07 | Phase 2 | Complete (02-02) |
 | HW-08 | Phase 10 | Pending |
-| HW-09 | Phase 2 | Pending |
+| HW-09 | Phase 2 | Complete (02-02) |
 
 **Coverage:**
 - v1 requirements: 38 total
