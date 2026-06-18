@@ -23,6 +23,7 @@ import. This mirrors the lazy-import discipline in
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,15 +40,22 @@ class ManagerState(BaseModel):
     ``torch.cuda.memory_allocated`` (the torch pool) for the two-pool
     fix (Pitfall 2).
 
-    For 02-01, the ``loaded`` list in :class:`VRAMState` is built from
-    this dict with a placeholder ``model_id = "<category>:unknown"``;
-    02-02 plumbs the real ``model_id`` and ``loaded_at`` from a richer
-    ``ManagerState``.
+    ``loaded_meta`` (added in 02-02) maps each loaded category to its
+    full ``LoadedModel`` record (typed as ``Any`` here to avoid a
+    circular import with :mod:`app.models.manager`, which imports
+    :func:`set_manager_state` from this module) so
+    ``GET /diagnostics/vram`` can surface the real ``model_id`` +
+    ``loaded_at`` instead of the 02-01 ``"<category>:unknown"``
+    placeholder.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     live_vram_bytes: dict[ModelCategory, int] = Field(default_factory=dict)
+    # ``LoadedModel`` lives in :mod:`app.models.manager`; typing as
+    # ``Any`` avoids the circular import while preserving the runtime
+    # values (Pydantic stores whatever the manager assigns).
+    loaded_meta: dict[ModelCategory, Any] = Field(default_factory=dict)
 
 
 # Module-level singleton. The lifespan installs a fresh empty state at
@@ -71,22 +79,36 @@ def set_manager_state(state: ManagerState) -> None:
 
 
 def _loaded_list(manager_state: ManagerState) -> list[LoadedModelInfo]:
-    """Build the ``loaded`` list from ``manager_state.live_vram_bytes``.
+    """Build the ``loaded`` list from ``manager_state``.
 
-    02-01 placeholder: ``model_id = "<category>:unknown"`` because the
-    manager is not wired in yet. 02-02 plumbs the real ``model_id`` and
-    ``loaded_at`` from a richer ``ManagerState``.
+    Prefers the real :class:`LoadedModel` record from
+    ``loaded_meta`` (02-02); falls back to the
+    ``"<category>:unknown"`` placeholder (02-01) when no meta is
+    recorded for a category.
     """
     now = utcnow_iso()
-    return [
-        LoadedModelInfo(
-            category=category,
-            model_id=f"{category.value}:unknown",
-            vram_mb=int(bytes_ // 1024**2),
-            loaded_at=now,
-        )
-        for category, bytes_ in manager_state.live_vram_bytes.items()
-    ]
+    out: list[LoadedModelInfo] = []
+    for category, bytes_ in manager_state.live_vram_bytes.items():
+        meta = manager_state.loaded_meta.get(category)
+        if meta is not None:
+            out.append(
+                LoadedModelInfo(
+                    category=meta.category,
+                    model_id=meta.model_id,
+                    vram_mb=int(meta.vram_bytes // 1024**2),
+                    loaded_at=meta.loaded_at,
+                )
+            )
+        else:
+            out.append(
+                LoadedModelInfo(
+                    category=category,
+                    model_id=f"{category.value}:unknown",
+                    vram_mb=int(bytes_ // 1024**2),
+                    loaded_at=now,
+                )
+            )
+    return out
 
 
 def probe_vram(backend: GpuBackend, manager_state: ManagerState) -> VRAMState:
