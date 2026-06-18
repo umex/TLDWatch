@@ -16,7 +16,9 @@ from __future__ import annotations
 import shutil
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import AsyncIterator, Iterator
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -24,7 +26,7 @@ import pytest_asyncio
 
 from app.api.dependencies import configure
 from app.main import app
-from app.models.diagnostics import GpuBackend
+from app.models.diagnostics import BackendProbe, GpuBackend, VRAMState
 from app.models.settings import Settings
 from app.storage.fs import bootstrap_settings_path
 
@@ -119,3 +121,94 @@ async def client(app_under_test: object) -> AsyncIterator[httpx.AsyncClient]:
     # header is on the TrustedHostMiddleware allow-list.
     async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as ac:
         yield ac
+
+
+# --- Phase 2 mock fixtures (Plan 02-01 Task 3) ---------------------------
+#
+# Each fixture patches a module-level seam via ``monkeypatch.setattr``
+# so the mock is auto-undone at end-of-test. Tests override the
+# ``return_value`` / ``side_effect`` per-case.
+
+
+@pytest.fixture
+def mock_backend_detect(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Patch ``app.models.backend.detect`` + ``burn_test`` with AsyncMocks.
+
+    Default: ``detect`` returns ``GpuBackend.CPU``; ``burn_test`` returns
+    a CPU-shaped :class:`BackendProbe` (``burn_test_ms=None``,
+    ``vram_total_mb=None``, ``device_name="CPU"``). Tests override the
+    ``return_value`` per-case, e.g.
+    ``mock_backend_detect.detect.return_value = GpuBackend.CUDA``.
+
+    Returns a :class:`types.SimpleNamespace` with ``detect`` and
+    ``burn_test`` attributes pointing at the AsyncMocks so tests can
+    also assert call counts (``mock_backend_detect.detect.assert_not_called()``).
+    """
+    from app.models import backend as backend_module
+
+    detect_mock = AsyncMock(return_value=GpuBackend.CPU)
+    burn_mock = AsyncMock(
+        return_value=BackendProbe(
+            backend=GpuBackend.CPU,
+            device_name="CPU",
+            burn_test_ms=None,
+            vram_total_mb=None,
+            notes="no GPU detected; running in CPU mode",
+        )
+    )
+    monkeypatch.setattr(backend_module, "detect", detect_mock)
+    monkeypatch.setattr(backend_module, "burn_test", burn_mock)
+    return SimpleNamespace(detect=detect_mock, burn_test=burn_mock)
+
+
+@pytest.fixture
+def mock_hf_hub_url(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Patch ``app.models.hf_token._head`` + ``_hf_hub_url``.
+
+    Default: ``_head`` returns ``(401, {})`` (token invalid). Tests
+    override the ``return_value`` per-case, e.g.
+    ``mock_hf_hub_url.return_value = (200, {"x-repo-author": "alice"})``,
+    or set ``side_effect = httpx.ConnectError(...)`` to simulate a
+    network error (Pitfall 3).
+
+    Returns the ``_head`` AsyncMock so tests can configure it
+    directly. ``_hf_hub_url`` is replaced with a deterministic lambda
+    so the test does not need ``huggingface_hub`` installed.
+    """
+    from app.models import hf_token as hf_module
+
+    head_mock = AsyncMock(return_value=(401, {}))
+    monkeypatch.setattr(hf_module, "_head", head_mock)
+    monkeypatch.setattr(
+        hf_module,
+        "_hf_hub_url",
+        lambda repo_id, filename: (
+            f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+        ),
+    )
+    return head_mock
+
+
+@pytest.fixture
+def mock_probe_vram(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Patch ``app.api.routes_diagnostics.probe_vram`` with a MagicMock.
+
+    Default: returns a zeroed :class:`VRAMState` with
+    ``backend=GpuBackend.CPU`` and ``loaded=[]``. Tests override the
+    ``return_value`` per-case. The patch targets the route module's
+    bound reference (``from app.models.vram import probe_vram``) so
+    the mock is seen by ``GET /diagnostics/vram``.
+    """
+    from app.api import routes_diagnostics as routes_module
+
+    mock = MagicMock(
+        return_value=VRAMState(
+            backend=GpuBackend.CPU,
+            total_mb=0,
+            available_mb=0,
+            used_mb=0,
+            loaded=[],
+        )
+    )
+    monkeypatch.setattr(routes_module, "probe_vram", mock)
+    return mock

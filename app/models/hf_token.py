@@ -51,6 +51,32 @@ def _hf_hub_url(repo_id: str, filename: str) -> str:
     return hf_hub_url(repo_id, filename)
 
 
+async def _head(url: str, headers: dict) -> tuple[int, dict]:
+    """Module-level seam for the HF Hub HEAD call.
+
+    Returns ``(status_code, response_headers)`` so the four-state
+    mapping in :func:`validate_token` can read both. Declared at
+    module scope so tests can ``monkeypatch.setattr`` it with a fake
+    that returns a canned status code (or raises ``httpx.HTTPError``
+    to simulate a network error) WITHOUT touching the real
+    ``httpx`` package.
+
+    The real implementation lazy-imports ``httpx`` inside the function
+    body so a CPU-only test environment does not need httpx installed
+    for unrelated imports.
+    """
+    import httpx  # type: ignore[import-not-found]
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.head(
+            url,
+            headers=headers,
+            timeout=5.0,
+            follow_redirects=True,
+        )
+        return resp.status_code, dict(resp.headers)
+
+
 async def validate_token(
     token: str | None, repo_id: str = _DEFAULT_REPO_ID
 ) -> HfTokenResult:
@@ -68,7 +94,7 @@ async def validate_token(
         return HfTokenResult(status="skipped", reason="no token configured")
 
     try:
-        import httpx  # type: ignore[import-not-found]
+        import httpx  # type: ignore[import-not-found]  # noqa: F401
     except Exception as exc:
         _log.warning("validate_token: httpx import failed: %s", exc)
         return HfTokenResult(status="skipped", reason="HF Hub unreachable")
@@ -85,23 +111,19 @@ async def validate_token(
         return HfTokenResult(status="skipped", reason="HF Hub unreachable")
 
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.head(
-                url,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=5.0,
-                follow_redirects=True,
-            )
-    except httpx.HTTPError as exc:
+        status_code, headers = await _head(
+            url, {"Authorization": f"Bearer {token}"}
+        )
+    except Exception as exc:
+        # ``_head`` raises ``httpx.HTTPError`` (or a subclass) on any
+        # transport failure; we also catch any other exception so the
+        # helper never raises (Pitfall 3 — the app does not refuse to
+        # start on a flaky network).
         _log.info("validate_token: HF Hub unreachable: %s", exc)
         return HfTokenResult(status="skipped", reason="HF Hub unreachable")
-    except Exception as exc:
-        _log.warning("validate_token: unexpected error: %s", exc)
-        return HfTokenResult(status="skipped", reason="HF Hub unreachable")
 
-    status_code = resp.status_code
     if status_code == 200:
-        user = resp.headers.get("x-repo-author")
+        user = headers.get("x-repo-author")
         return HfTokenResult(status="ok", user=user)
     if status_code == 401:
         return HfTokenResult(status="rejected", reason="token invalid")
