@@ -191,24 +191,97 @@ def mock_hf_hub_url(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
 @pytest.fixture
 def mock_probe_vram(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Patch ``app.api.routes_diagnostics.probe_vram`` with a MagicMock.
+    """Patch ``probe_vram`` for both the diagnostics route and the manager.
 
-    Default: returns a zeroed :class:`VRAMState` with
-    ``backend=GpuBackend.CPU`` and ``loaded=[]``. Tests override the
-    ``return_value`` per-case. The patch targets the route module's
-    bound reference (``from app.models.vram import probe_vram``) so
-    the mock is seen by ``GET /diagnostics/vram``.
+    Default: a generous CUDA :class:`VRAMState` (``total_mb=8192``,
+    ``available_mb=8192``, ``used_mb=0``) whose ``loaded`` list is
+    built from the real ``manager_state`` passed in (so
+    ``GET /diagnostics/vram`` reflects the live ``loaded_meta`` even
+    with the mock). Tests override ``side_effect`` per-case (e.g. a
+    tight state for the ``VramBudgetExceeded`` test that does NOT
+    inspect the loaded list).
+
+    Patches BOTH the route module's bound reference
+    (``app.api.routes_diagnostics.probe_vram``) AND the manager
+    module's bound reference (``app.models.manager.probe_vram``) so
+    the mock is seen by both ``GET /diagnostics/vram`` and
+    ``POST /models/{id}/load``.
     """
     from app.api import routes_diagnostics as routes_module
+    from app.models import manager as manager_module
+    from app.models.vram import _loaded_list
 
-    mock = MagicMock(
-        return_value=VRAMState(
-            backend=GpuBackend.CPU,
-            total_mb=0,
-            available_mb=0,
+    def _default(backend, manager_state):
+        return VRAMState(
+            backend=GpuBackend.CUDA,
+            total_mb=8192,
+            available_mb=8192,
             used_mb=0,
-            loaded=[],
+            loaded=_loaded_list(manager_state),
         )
-    )
+
+    mock = MagicMock(side_effect=_default)
     monkeypatch.setattr(routes_module, "probe_vram", mock)
+    monkeypatch.setattr(manager_module, "probe_vram", mock)
     return mock
+
+
+@pytest.fixture
+def mock_hf_hub_download(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Patch the manager's lazy ``hf_hub_download`` seam with a MagicMock.
+
+    The manager lazy-imports ``huggingface_hub.hf_hub_download`` inside
+    ``ensure_downloaded``. This fixture ensures ``huggingface_hub`` is
+    imported (it is a real dependency per pyproject) and patches the
+    ``hf_hub_download`` attribute on the real module so the manager's
+    ``from huggingface_hub import hf_hub_download`` resolves to the
+    mock. The default writes ``b"x" * spec.expected_size_bytes`` bytes
+    to ``<local_dir>/<filename>`` (so the size + SHA fast-paths see a
+    complete file). Tests override ``side_effect`` per-case (e.g.
+    raise ``GatedRepoError``).
+    """
+    import huggingface_hub  # type: ignore[import-not-found]
+    from app.models.registry import REGISTRY
+
+    def _default_download(*, repo_id, filename, revision, local_dir, token):
+        from pathlib import Path
+
+        out_path = Path(local_dir) / filename
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        size = 0
+        for spec in REGISTRY.values():
+            if spec.repo_id == repo_id and (spec.file or "model.bin") == filename:
+                size = spec.expected_size_bytes or 0
+                break
+        with out_path.open("wb") as fh:
+            fh.write(b"x" * size)
+        return str(out_path)
+
+    mock = MagicMock(side_effect=_default_download)
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", mock)
+    return mock
+
+
+@pytest_asyncio.fixture
+async def configured_model_manager(
+    tmp_data_dir: Path,
+    mock_probe_vram: MagicMock,
+) -> AsyncIterator[object]:
+    """Build a ``ModelManager`` from the test settings and configure it.
+
+    Cleans up via ``configure_manager(None)`` (which also resets the
+    vram ``ManagerState`` singleton). The mock_probe_vram fixture is
+    pulled in so the manager's ``load`` sees the generous default
+    state.
+    """
+    from app.models import manager as manager_module
+    from app.models.manager import ModelManager, configure_manager
+    from app.settings import service as settings_service
+
+    settings = settings_service.current()
+    mgr = ModelManager(settings)
+    configure_manager(mgr)
+    try:
+        yield mgr
+    finally:
+        configure_manager(None)

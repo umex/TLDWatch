@@ -44,6 +44,7 @@ from app.api.dependencies import configure
 from app.api.routes_diagnostics import router as diagnostics_router
 from app.api.routes_health import router as health_router
 from app.api.routes_jobs import router as jobs_router
+from app.api.routes_models import router as models_router
 from app.api.routes_settings import router as settings_router
 from app.models import (
     BackendProbe,
@@ -56,6 +57,15 @@ from app.models import (
 )
 from app.models import backend as backend_module
 from app.models.diagnostics import GpuBackend, ModelCategory, QualityPreset
+from app.models.manager import (
+    DownloadProgress,
+    DownloadTaskResponse,
+    LoadedModel,
+    ModelManager,
+    ModelsListResponse,
+    configure_manager,
+    get_manager,
+)
 from app.models.settings import Settings
 from app.models.summary import Summary
 from app.models.transcript import Transcript, TranscriptSegment
@@ -169,6 +179,15 @@ async def lifespan(app: FastAPI):
     # swap this for the model manager's live state.
     set_manager_state(ManagerState(live_vram_bytes={}))
 
+    # Phase 2 (02-02): build + configure the ModelManager singleton
+    # AFTER the settings are fully populated (after the first-boot
+    # detect from 02-01 and after apply_pending() from H1) so the
+    # manager's settings_factory reads the live in-memory state. The
+    # manager's state is also installed as the vram ManagerState
+    # singleton (via configure_manager -> set_manager_state) so
+    # ``GET /diagnostics/vram`` sees the live ``loaded_meta``.
+    configure_manager(ModelManager(settings))
+
     # Startup reconciliation: walk every per-job folder and UPDATE
     # any DB row that has drifted from its manifest (Codex HIGH #1
     # follow-up). A reconcile failure means the DB and FS are in a
@@ -198,10 +217,25 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        # Phase 2 (02-02): unload every resident model before the
+        # engine disposes (D-03 shutdown path). Best-effort: a failure
+        # here does not block shutdown.
+        try:
+            from app.models.manager import get_manager as _get_manager
+
+            try:
+                await _get_manager().unload_all()
+            except RuntimeError:
+                # Manager not configured (e.g. lifespan failed before
+                # configure_manager); skip.
+                pass
+        except Exception:  # pragma: no cover - defensive teardown
+            logger.exception("model manager unload_all failed on shutdown")
         await engine.dispose()
         # Reset module-level references so a second lifespan (e.g. in
         # tests) starts from a known state.
         configure(None, None)  # type: ignore[arg-type]
+        configure_manager(None)
 
 
 app = FastAPI(title="TranscriptionAndNotes", version="0.1.0", lifespan=lifespan)
@@ -241,6 +275,11 @@ _EXTRA_OPENAPI_MODELS = [
     HfTokenResult,
     ModelSpec,
     ModelSet,
+    # Phase 2 model-manager API types (02-02).
+    DownloadProgress,
+    LoadedModel,
+    ModelsListResponse,
+    DownloadTaskResponse,
 ]
 
 
@@ -288,3 +327,4 @@ app.include_router(health_router)
 app.include_router(jobs_router)
 app.include_router(settings_router)
 app.include_router(diagnostics_router)
+app.include_router(models_router)
