@@ -265,21 +265,25 @@ class ModelManager:
         ):
             return target
 
-        # Corrupt-SHA fast-path: delete + re-download once.
+        # Corrupt-SHA fast-path: if the target exists and a SHA is set,
+        # verify it. On MATCH, return the cached file early so a valid
+        # download is NOT re-fetched (and works offline) -- WR-06. On
+        # mismatch, delete + re-download once (bounded retry).
         if (
             target.exists()
             and spec.expected_sha256 is not None
             and target.stat().st_size > 0
         ):
-            if _sha256_of_file(target) != spec.expected_sha256:
-                _log.warning(
-                    "corrupt model file at %s (sha mismatch); re-downloading",
-                    target,
-                )
-                try:
-                    target.unlink()
-                except OSError:
-                    pass
+            if _sha256_of_file(target) == spec.expected_sha256:
+                return target
+            _log.warning(
+                "corrupt model file at %s (sha mismatch); re-downloading",
+                target,
+            )
+            try:
+                target.unlink()
+            except OSError:
+                pass
 
         from huggingface_hub import hf_hub_download  # type: ignore[import-not-found]
         from huggingface_hub.errors import (  # type: ignore[import-not-found]
