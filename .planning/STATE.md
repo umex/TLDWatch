@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Phase 2 context gathered
-last_updated: "2026-06-18T19:03:53.313Z"
-last_activity: 2026-06-15 -- Phase 01 plan 4 (01-04) gap-closure complete
+status: executing
+stopped_at: Phase 02 plan 02-01 complete
+last_updated: "2026-06-18T20:05:00.000Z"
+last_activity: 2026-06-18 -- Phase 02 plan 02-01 executed (SC-1 + D-05/D-06/D-08/D-09/D-15 honored; 134 tests green)
 progress:
   total_phases: 10
   completed_phases: 1
   total_plans: 7
-  completed_plans: 4
-  percent: 10
+  completed_plans: 5
+  percent: 12
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** The user can drop in any video and get back a clean, speaker-aware transcript plus summaries shaped for the content type — without it ever leaving the machine.
-**Current focus:** Phase 01 — back-end-skeleton-storage-data-layout
+**Current focus:** Phase 02 — gpu-backend-detection-model-manager
 
 ## Current Position
 
-Phase: 01 (back-end-skeleton-storage-data-layout) — COMPLETE
-Plan: 4 of 4
-Status: Phase 01 ready for verification
-Last activity: 2026-06-15 -- Phase 01 plan 4 (01-04) gap-closure complete
+Phase: 02 (gpu-backend-detection-model-manager) — EXECUTING
+Plan: 2 of 3 (02-01 complete; next: 02-02 model manager)
+Status: Executing Phase 02
+Last activity: 2026-06-18 -- Phase 02 plan 02-01 executed (SC-1 + D-05/D-06/D-08/D-09/D-15 honored; 134 tests green)
 
-Progress: [████░░░░░░░░░] 10%
+Progress: [█████░░░░░░░░] 12%
 
 ## Performance Metrics
 
@@ -45,10 +45,11 @@ Progress: [████░░░░░░░░░] 10%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 4 | 4 | — |
+| 02 | 1 | ~25 min | — |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01, 01-02, 01-03, 01-04 (UAT green at 78 tests, gap-closure green at 113 tests)
+- Last 5 plans: 01-01, 01-02, 01-03, 01-04, 02-01 (134 tests green after 02-01)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -63,6 +64,7 @@ Recent decisions affecting current work:
 - Roadmap uses 10 phases, mvp mode, standard granularity — derived from research/SUMMARY.md build-order rationale.
 - Project skill guidance loaded; project skills directory was absent in this run, so no per-skill rules were applied.
 - **Plan 01-04 (gap-closure):** `PATCH /settings` is restart-only via a `pending` slot in the on-disk JSON; the in-memory state is not swapped until the next boot (`apply_pending()` in the lifespan). `stage_to_status(stage, manifest)` is the single source of truth for the stage-to-status mapping; `update_stage` writes status + full metadata in a single UPDATE; `reconcile_all` projects the same columns on boot. `create_job` compensates the DB row on folder/manifest failure. `parse_stage_file` validates stage files against typed Pydantic models. `mark_stale` is a no-op on terminal rows. Migration runner records the version on the all-duplicate-column path.
+- **Plan 02-01 (GPU detect + settings wire-in):** `Settings` extended with 7 Phase 2 fields (D-08 declare-now); `backend: GpuBackend` is REQUIRED (no default) so a Phase 1 settings file triggers the first-boot detect path in the lifespan (`try/except` around `load_settings_from_disk` -> `await backend_module.detect()` + `burn_test()` -> atomic write). `hf_token` base64 on disk via `field_serializer` + `field_validator(mode="before")` (D-05); never returned in `GET /settings` (route nulls the body). `UpdateSettingsRequest` is all-optional (data_dir, hf_token, quality_preset, per_category_overrides, concurrent_models, vram_budget_fraction) with `extra="forbid"` (D-08 — backend/backend_probe NOT declared); a `model_validator` rejects empty PATCH and explicit-null data_dir; per-field `strict=False` on enum/nested-model fields so JSON coerces. `apply_update` rewritten to write the FULL `new.model_dump()` to disk (was only updating data_dir) so Phase 2 hot-swap fields persist. `probe_vram` implements the two-pool fix (torch.cuda.memory_allocated + sum(live_vram_bytes), Pitfall 2). `validate_token` four-state shim (D-05, Pitfall 3); `_head` extracted as module-level async seam for tests. `POST /diagnostics/gpu-burn` hot-swaps backend + backend_probe atomically (no X-Restart-Required; H1). 134 tests green (113 existing + 21 new).
 
 ### Pending Todos
 
@@ -92,9 +94,9 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-18T18:39:38.877Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-gpu-backend-detection-model-manager/02-CONTEXT.md
+Last session: 2026-06-18T20:05:00.000Z
+Stopped at: Phase 02 plan 02-01 complete
+Resume file: .planning/phases/02-gpu-backend-detection-model-manager/02-01-SUMMARY.md
 
 ### Gap-closure wave (01-04) — closed
 

@@ -63,7 +63,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **HW-01**: Front-end (React) and back-end (Python) are separated and communicate via a job API
 - [ ] **HW-02**: Transcription, diarization, and LLM summarization all run on local models on the user's GPU
-- [ ] **HW-03**: App auto-detects GPU (NVIDIA CUDA vs AMD ROCm vs CPU fallback) on first run and configures backends silently
+- [x] **HW-03**: App auto-detects GPU (NVIDIA CUDA vs AMD ROCm vs CPU fallback) on first run and configures backends silently
 - [ ] **HW-04**: App downloads its own models on first run; user can swap model variants in settings
 - [ ] **HW-05**: User can configure a "quality preset" (e.g. small / balanced / large) in settings; the app picks compatible model variants automatically
 - [ ] **HW-06**: User can override the model selection per category (transcription / diarization / LLM) from a settings panel
@@ -157,7 +157,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UI-03 | Phase 5 | Pending |
 | HW-01 | Phase 1 | Pending |
 | HW-02 | Phase 2 | Pending |
-| HW-03 | Phase 2 | Pending |
+| HW-03 | Phase 2 | Complete (02-01) |
 | HW-04 | Phase 2 | Pending |
 | HW-05 | Phase 10 | Pending |
 | HW-06 | Phase 10 | Pending |

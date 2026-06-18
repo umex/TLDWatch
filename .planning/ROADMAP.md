@@ -67,7 +67,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 02-01: First-run GPU detect + burn-in test + settings.json write (autonomous; HW-02, HW-03)
+- [x] 02-01: First-run GPU detect + burn-in test + settings.json write (autonomous; HW-02, HW-03)
 
 **Wave 2** *(blocked on Wave 1 completion; 02-02 and 02-03 run in parallel)*
 
