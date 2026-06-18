@@ -26,7 +26,7 @@ The `tmp_data_dir` fixture is updated to write `Settings(data_dir=str(data_dir.r
 
 | Item | Sample count | Source of truth |
 |------|--------------|-----------------|
-| Settings round-trip fields (the 7 new fields) | 1 per field (7 tests) | `test_settings_phase2.py` |
+| Settings round-trip fields (the 7 new fields + hf_token null-in-response) | 1 per field (8 tests) | `test_settings_phase2.py` |
 | Detect paths (CUDA / ROCM / CPU + subsequent-boot) | 4 paths | `test_gpu_detect.py` |
 | HF token four-state table (skipped / ok / 401 / 403 / network-error) | 5 tests | `test_hf_token.py` |
 | Diagnostics API (gpu-burn / vram / test-hf-token) | 4 tests | `test_diagnostics_api.py` |
@@ -35,7 +35,7 @@ The `tmp_data_dir` fixture is updated to write `Settings(data_dir=str(data_dir.r
 | VRAM budget (refuse / succeed / unload clears) | 3 tests | `test_vram_budget.py` |
 | Concurrent models (refuse default / opt-in / openapi / unload-then-load) | 4 tests | `test_concurrent_models.py` |
 | Spike contract guard (exists / sections / verdict / Phase 3 must-have) | 4 tests | `test_spike_documented.py` |
-| **Total new test cases** | **37** | across 9 files |
+| **Total new test cases** | **40** | across 9 files |
 
 ## Per-Task Verification Map
 
@@ -87,7 +87,7 @@ The following grep gates are used by the acceptance criteria across the plans. T
 - [x] `grep -rE "from huggingface_hub" app/` — must return matches only in `app/models/manager.py` and `app/models/hf_token.py` (boundary check; the route layer + `app/main.py` must not import the library directly)
 - [x] `grep -E "BackendProbe|VRAMState|LoadedModelInfo|...|ModelSet" app/main.py` — must return matches in `_EXTRA_OPENAPI_MODELS` (OpenAPI surface check)
 - [x] `pytest tests/test_presets.py tests/test_manager_download.py tests/test_vram_budget.py tests/test_concurrent_models.py -q` — must exit 0
-- [x] `pytest -q` (full suite) — must exit 0; the 113 Phase 1 tests + the 37 new tests = 150 total
+- [x] `pytest -q` (full suite) — must exit 0; the 113 Phase 1 tests + the 40 new tests = 153 total
 
 ## Open Questions for Verify-Phase
 

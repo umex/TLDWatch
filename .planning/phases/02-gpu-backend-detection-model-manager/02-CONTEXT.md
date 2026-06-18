@@ -127,7 +127,7 @@ Out of scope for Phase 2: any front-end/UI (Phase 5), the orchestrator/queue/Web
 - **One-time first-run "Running on CPU" notice flag** (for Phase 5/10 UI to render once) — Phase 10; Phase 2 is silent log-only (D-06).
 - **Quality-preset picker + per-category override picker UI** — Phase 10 (declared in the model now per D-08; not surfaced until Phase 10).
 - **`data/runtime/rocm_probe.json` runtime artifact from the spike** — YAGNI; `settings.backend_probe` already records the probe result; the markdown `02-03-SPIKE.md` is enough (RESEARCH open question 2).
-- **`expected_size_bytes` / `expected_sha256` for the Qwen2.5-7B GGUF** — leave `None` in `presets.py`, re-verify actual file size from HF at registry-build time in plan 02-02 (RESEARCH open question 4).
+- **`expected_size_bytes` / `expected_sha256` for the Qwen2.5-7B GGUF** — leave `expected_sha256=None` in `presets.py`/`registry.py` and re-verify the actual file size from HF at registry-build time in plan 02-02 (RESEARCH open question 4). An approximation (`expected_size_bytes=4_500_000_000` for the Q4_K_M GGUF) is acceptable for Phase 2 VRAM budget math only; it is NOT used for integrity verification (SHA256 is the integrity check). Exact size is re-verified from HF at registry-build time.
 - **Exact `n_gpu_layers` for the desktop llama.cpp HIP path** — re-verify at 02-03 spike time on the user's box (RESEARCH open question 3).
 
 </deferred>
