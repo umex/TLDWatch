@@ -149,7 +149,7 @@ def probe_vram(backend: GpuBackend, manager_state: ManagerState) -> VRAMState:
                 total_mb=int(ps.total / 1024**2),
                 available_mb=int(ps.available / 1024**2),
                 used_mb=int(rss / 1024**2),
-                loaded=[],
+                loaded=_loaded_list(manager_state),
             )
         except Exception:
             return VRAMState(
