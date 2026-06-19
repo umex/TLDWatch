@@ -23,6 +23,16 @@ dependencies = [
     "huggingface_hub>=0.25",
     "psutil>=5.9",
     "httpx>=0.27",
+    # Phase 3: STT adapter (D-08 — the verified-compatible pair). These
+    # are the ONLY faster_whisper / ctranslate2 pins; the [project.scripts]
+    # `transcribe` entry point is declared in 03-03 (not here, per Codex
+    # HIGH: declaring it before app.cli.transcribe exists breaks editable
+    # installs / smoke tests in Waves 1-2). nvidia-cublas-cu12 /
+    # nvidia-cuda-runtime-cu12 are NOT added here — deferred to the SC-5
+    # checkpoint in 03-03 which gates any CUDA-runtime-lib pip install on a
+    # blocking-human verify (RESEARCH Pitfall 1 / Open Q1).
+    "faster-whisper==1.2.1",
+    "ctranslate2==4.7.2",
 ]
 
 [project.optional-dependencies]

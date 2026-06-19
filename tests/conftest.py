@@ -373,3 +373,117 @@ async def configured_model_manager(
         yield mgr
     finally:
         configure_manager(None)
+
+
+# --- Phase 3 STT adapter fixtures ------------------------------------------
+#
+# ``mock_stt_adapter`` mirrors the Phase 2 ``mock_hf_hub_download`` pattern
+# (real-module-import + ``monkeypatch.setattr`` on the lazy import seam).
+# ``faster_whisper`` is a real dependency (pinned in pyproject Phase 3) so
+# the real import at fixture-setup time succeeds. The fixture patches:
+#   - ``faster_whisper.WhisperModel`` -> a MagicMock class whose instances
+#     expose ``.model.compute_type`` (read by D-08 int8 verification) and
+#     whose ``transcribe`` / ``detect_language`` return deterministic
+#     SimpleNamespaces.
+#   - ``faster_whisper.audio.decode_audio`` -> a stub returning
+#     ``fake_audio_array()`` so 03-02's decode_audio unit test can assert
+#     ``FasterWhisperAdapter.decode_audio(path)`` returns the stubbed array
+#     without hitting PyAV / FFmpeg.
+#
+# Cross-plan fixture ownership: ``mock_stt_adapter`` is DEFINED here in
+# 03-01 and EXTENDED (not redefined) by 03-02; 03-02 must not duplicate the
+# fixture.
+@pytest.fixture
+def mock_stt_adapter(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Patch the adapter's lazy ``faster_whisper`` import seam.
+
+    Returns a ``MagicMock`` whose ``.compute_type`` attribute is the
+    value the mock WhisperModel's inner ``.model.compute_type`` returns.
+    Tests override ``mock_stt_adapter.compute_type`` to simulate the
+    silent-fallback (``"float32"``) or the accepted substitution
+    (``"int8_float16"``) path. The default is ``"int8_float16"`` so a
+    plain ``load()`` with ``requested="int8_float16"`` succeeds without
+    per-test setup.
+    """
+    import faster_whisper  # type: ignore[import-not-found]
+    import faster_whisper.audio as _fw_audio  # type: ignore[import-not-found]
+
+    class _InnerModel:
+        def __init__(self, compute_type: str) -> None:
+            self.compute_type = compute_type
+
+    class _WhisperModel:
+        def __init__(self, model_path, device="cuda", compute_type="int8_float16", **_kwargs) -> None:
+            self.model = _InnerModel(compute_type)
+            # Allow per-test override of the reported compute_type
+            # (tests mutate mock_stt_adapter.compute_type BEFORE load()).
+            self.model.compute_type = mock.compute_type
+
+        def transcribe(self, audio, language=None, vad_filter=True, condition_on_previous_text=True, **_kwargs):
+            seg = SimpleNamespace(start=1.0, end=3.0, text="hi", avg_logprob=-0.1)
+            info = SimpleNamespace(language="en", language_probability=0.99, duration=30.0)
+            return iter([seg]), info
+
+        def detect_language(self, audio, vad_filter=True, **_kwargs):
+            return ("en", 0.99, {})
+
+    mock = MagicMock(spec=_WhisperModel)
+    mock.compute_type = "int8_float16"
+    # Use a real class instance so attribute access (``self.model``)
+    # works naturally and so tests can mutate ``mock.compute_type`` and
+    # have the next __init__ pick it up.
+    real_class = _WhisperModel
+
+    def _factory(model_path, device="cuda", compute_type="int8_float16", **kwargs):
+        return real_class(model_path, device=device, compute_type=compute_type, **kwargs)
+
+    # Expose the per-test override knob on the factory itself.
+    _factory.compute_type = "int8_float16"
+
+    class _PatchedWhisperModel:
+        def __new__(cls, *args, **kwargs):
+            inst = real_class(*args, **kwargs)
+            # Honor the latest per-test override set on the mock.
+            inst.model.compute_type = getattr(mock, "compute_type", "int8_float16")
+            return inst
+
+    monkeypatch.setattr(faster_whisper, "WhisperModel", _PatchedWhisperModel)
+
+    # Patch the decode_audio seam so 03-02's unit test sees a stubbed
+    # array without hitting PyAV / FFmpeg.
+    def _fake_decode_audio(path, *args, **kwargs):
+        import numpy as np  # type: ignore[import-not-found]
+        return np.zeros(16000 * 30, dtype="float32")
+
+    monkeypatch.setattr(_fw_audio, "decode_audio", _fake_decode_audio)
+    return mock
+
+
+@pytest.fixture
+def fake_audio_array() -> "object":
+    """A 30 s silence 16 kHz float32 numpy array (the decode_audio shape)."""
+    import numpy as np  # type: ignore[import-not-found]
+    return np.zeros(16000 * 30, dtype="float32")
+
+
+@pytest.fixture
+def mock_ct2_supported_compute_types(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Patch ``ctranslate2.get_supported_compute_types`` for the int8 tests.
+
+    Returns the mock; tests can assert on call args. Defaults:
+    ``cuda`` -> {``"int8"``, ``"int8_float16"``, ``"float16"``},
+    ``cpu`` -> {``"int8"``, ``"int8_float32"``, ``"float32"``}.
+    """
+    import ctranslate2  # type: ignore[import-not-found]
+
+    _table = {
+        "cuda": {"int8", "int8_float16", "float16"},
+        "cpu": {"int8", "int8_float32", "float32"},
+    }
+
+    def _get(device, device_index=0, **_kwargs):
+        return _table.get(device, {"int8", "int8_float16"})
+
+    mock = MagicMock(side_effect=_get)
+    monkeypatch.setattr(ctranslate2, "get_supported_compute_types", mock)
+    return mock
