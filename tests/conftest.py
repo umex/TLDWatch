@@ -407,6 +407,21 @@ def mock_stt_adapter(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """
     import faster_whisper  # type: ignore[import-not-found]
     import faster_whisper.audio as _fw_audio  # type: ignore[import-not-found]
+    import ctranslate2  # type: ignore[import-not-found]
+
+    # Patch ``ctranslate2.get_supported_compute_types`` so ``load()`` does
+    # not hit a real CUDA driver probe on this machine (the real call
+    # raises ``RuntimeError: CUDA driver version is insufficient`` on a
+    # machine without a matching CUDA runtime).
+    _ct2_table = {
+        "cuda": {"int8", "int8_float16", "float16"},
+        "cpu": {"int8", "int8_float32", "float32"},
+    }
+
+    def _get_supported(device, device_index=0, **_kwargs):
+        return _ct2_table.get(device, {"int8", "int8_float16"})
+
+    monkeypatch.setattr(ctranslate2, "get_supported_compute_types", _get_supported)
 
     class _InnerModel:
         def __init__(self, compute_type: str) -> None:
