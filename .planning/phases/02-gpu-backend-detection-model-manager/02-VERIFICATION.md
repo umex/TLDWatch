@@ -1,25 +1,33 @@
 ---
 phase: 02-gpu-backend-detection-model-manager
-verified: 2026-06-18T00:00:00Z
+verified: 2026-06-19T10:30:00Z
 status: passed
-score: 5/5 ROADMAP success criteria verified · 5/5 phase requirements (HW-02, HW-03, HW-04, HW-07, HW-09) accounted for · 155/155 tests green
+score: 5/5 ROADMAP success criteria verified · 5/5 phase requirements (HW-02, HW-03, HW-04, HW-07, HW-09) accounted for · 188/188 tests green
 source:
   - .planning/ROADMAP.md
   - .planning/REQUIREMENTS.md
   - .planning/phases/02-gpu-backend-detection-model-manager/02-01-PLAN.md
   - .planning/phases/02-gpu-backend-detection-model-manager/02-02-PLAN.md
   - .planning/phases/02-gpu-backend-detection-model-manager/02-03-PLAN.md
+  - .planning/phases/02-gpu-backend-detection-model-manager/02-04-PLAN.md
+  - .planning/phases/02-gpu-backend-detection-model-manager/02-05-PLAN.md
   - .planning/phases/02-gpu-backend-detection-model-manager/02-01-SUMMARY.md
   - .planning/phases/02-gpu-backend-detection-model-manager/02-02-SUMMARY.md
   - .planning/phases/02-gpu-backend-detection-model-manager/02-03-SUMMARY.md
+  - .planning/phases/02-gpu-backend-detection-model-manager/02-04-SUMMARY.md
+  - .planning/phases/02-gpu-backend-detection-model-manager/02-05-SUMMARY.md
+  - .planning/phases/02-gpu-backend-detection-model-manager/02-UAT.md
+  - .planning/phases/02-gpu-backend-detection-model-manager/02-REVIEW.md
   - .planning/phases/02-gpu-backend-detection-model-manager/02-03-SPIKE.md
-reviewed_at: 2026-06-18
-scope: Read-only adversarial verification. Verifier did not modify source. Confirms Phase 2 goal achievement via source code, live OpenAPI, and the green test suite (155 passed).
+reviewed_at: 2026-06-19
+scope: Read-only adversarial re-verification. Verifier did not modify source. Closes the SC-3 + SC-4 UAT gaps via source inspection, AST gate, targeted pytest, and the full 188-test suite.
 overrides_applied: 0
-re_verification: # No previous Phase 2 VERIFICATION.md existed; initial verification
-  previous_status: none
-  previous_score: 0/0
-  gaps_closed: []
+re_verification:
+  previous_status: passed
+  previous_score: 5/5 SC · 155/155 tests (initial verification, pre-UAT)
+  gaps_closed:
+    - "SC-3 download contract: hf_hub_download offloaded via asyncio.to_thread; classic non-Xet resume path forced (hf_xet=False + HF_HUB_DISABLE_XET=1); 5 live-behavior tests lock 409 dedupe + live SSE heartbeat + byte progress + resume"
+    - "SC-4 vram indicator on CPU: probe_vram CPU error-fallbacks return loaded=_loaded_list(manager_state); psutil installed in runtime env; 3 live tests lock the contract (psutil-present, psutil-absent, empty-state)"
   gaps_remaining: []
   regressions: []
 ---
@@ -28,8 +36,8 @@ re_verification: # No previous Phase 2 VERIFICATION.md existed; initial verifica
 
 **Mode:** mvp (per ROADMAP.md; success-criteria-driven)
 **Goal (from ROADMAP.md):** The system auto-detects CUDA vs ROCm vs CPU on first run, persists the choice, and owns the lifecycle of every local model on disk and in VRAM.
-**Verifier mode:** adversarial / goal-backward. SUMMARY claims are not evidence; only source code, tests, and live OpenAPI count.
-**Result:** **VERIFIED — all 5 ROADMAP success criteria pass; 5/5 phase requirements accounted for; 155/155 tests green; OpenAPI exposes every new type; boundary checks clean; the 02-03 spike verdict (ROCM_FALLBACK_TO_CPU) is valid empirical evidence for HW-03.**
+**Verifier mode:** adversarial / goal-backward. SUMMARY claims are not evidence; only source code, tests, and live gates count.
+**Result:** **VERIFIED — all 5 ROADMAP success criteria pass; 5/5 phase requirements accounted for; 188/188 tests green; the two UAT gaps (SC-3 download, SC-4 vram indicator) are closed in code and locked by integration tests; one open concurrency-risk note (CR-01) recorded below as a verified-in-single-thread / open-concurrency-risk item, NOT a hard gap.**
 
 ---
 
@@ -37,48 +45,50 @@ re_verification: # No previous Phase 2 VERIFICATION.md existed; initial verifica
 
 ### SC-1: First run silently writes `settings.json` with the right backend; re-detect via `POST /diagnostics/gpu-burn`
 
-**Status: PASS**
+**Status: PASS (regression check — unchanged by 02-04/02-05)**
 
-- `app/models/backend.py` defines `async def detect() -> GpuBackend` (ordered subprocess + env-var + lazy-torch probe; every `subprocess.run` wrapped in `try/except (TimeoutExpired, FileNotFoundError, OSError)` → silent CPU fallback, D-06) and `async def burn_test(backend) -> BackendProbe` (real 1024×1024 matmul on `cuda` + `torch.cuda.synchronize()` + `perf_counter`; CPU returns `burn_test_ms=None`, `vram_total_mb=None`).
-- `app/main.py:120` lifespan calls `await backend_module.detect()` + `await backend_module.burn_test(backend)` on the first-boot path (wraps `load_settings_from_disk` in `try/except`; builds a full `Settings` with all 7 fields; writes atomically). Subsequent boot (backend already set) skips detect.
-- `app/api/routes_diagnostics.py` exposes `POST /diagnostics/gpu-burn` which re-runs detect+burn and hot-swaps in-memory `Settings.backend` + `backend_probe` + atomic-writes the full settings (no `X-Restart-Required` — H1).
-- Tests: `tests/test_gpu_detect.py` (4 tests) cover CUDA/ROCm/CPU first-boot paths + subsequent-boot no-redetect; `tests/test_diagnostics_api.py` (4 tests) cover the gpu-burn hot-swap + on-disk persist. All pass.
+- `app/models/backend.py` `async def detect() -> GpuBackend` + `async def burn_test(backend) -> BackendProbe` unchanged (not in 02-04/02-05 file lists).
+- `app/main.py` lifespan first-boot detect + atomic write unchanged.
+- `POST /diagnostics/gpu-burn` hot-swap route unchanged.
+- `tests/test_gpu_detect.py` + `tests/test_diagnostics_api.py` (4 + 4 SC-1 tests) green in the 188-test run.
 
 ### SC-2: Default model set fits within 8 GB laptop VRAM; per-model VRAM budget logged on load
 
-**Status: PASS**
+**Status: PASS (regression check — unchanged by 02-04/02-05)**
 
-- `app/models/presets.py` `PRESETS[QualityPreset.BALANCED]` is `Systran/faster-whisper-large-v3` + `pyannote/speaker-diarization-3.1` + `Qwen/Qwen2.5-7B-Instruct-GGUF` (`qwen2.5-7b-instruct-q4_k_m.gguf` ~4.5 GB); SMALL and LARGE entries also present. Verified by direct import (line 1 of evidence below).
-- `app/models/manager.py:383-404` `ModelManager.load` probes VRAM via `probe_vram(settings.backend, self._state)` (Pitfall 2 two-pool fix), enforces `budget_mb = vram.total_mb * settings.vram_budget_fraction` (default 0.85), records the reservation in `live_vram_bytes` + `loaded_meta`, and emits a structured JSON INFO log line with the SC-2 keys (`event`/`category`/`model_id`/`expected_vram_mb`/`measured_vram_mb_after_load`/`total_vram_mb`/`available_vram_mb_after_load`).
-- 7B Q4_K_M = 4.5 GB on disk × LLM 1.2 overhead ≈ 5.15 GB in-VRAM, fits 0.85 × 8192 = 6963 MB budget.
-- Tests: `tests/test_presets.py` (6 tests) cover the BALANCED triple + override-wins; `tests/test_vram_budget.py` (3 tests) cover the budget gate + load + unload.
+- `app/models/presets.py` BALANCED triple (faster-whisper-large-v3 + pyannote/speaker-diarization-3.1 + Qwen2.5-7B-Instruct Q4_K_M) unchanged.
+- `app/models/manager.py:load` VRAM budget gate + structured INFO log line unchanged (the 02-04 edit was inside `ensure_downloaded`, not `load`).
+- `tests/test_presets.py` + `tests/test_vram_budget.py` green.
 
 ### SC-3: Model manager downloads, verifies size + SHA, exposes a download log, supports resume after crash
 
-**Status: PASS**
+**Status: PASS (gap closed by 02-04)**
 
-- `app/models/manager.py:284-308` `ensure_downloaded` lazy-imports `huggingface_hub.hf_hub_download` + the error classes inside the body (boundary check — only `manager.py` and `hf_token.py` import `huggingface_hub`); size fast-path; corrupt-SHA delete + re-download; `GatedRepoError` → `ModelGatedError`; `RepositoryNotFoundError` → `ModelManagerError`; post-download SHA verify with bounded 1-retry (Pitfall 4) → `ModelIntegrityError`. `force_download` is NOT passed (default False — resume via `<blob>.incomplete` + Range header).
-- `app/api/routes_models.py` six routes: `GET /models`, `POST /models/{id}/download` (202), `GET /models/{id}/status`, `GET /models/{id}/download-progress` (SSE), `POST /models/{id}/load`, `POST /models/{id}/unload` (204 idempotent). Typed-error HTTP mapping verified: `VramBudgetExceeded`→507, `ConcurrentModelRefused`→409, `ModelGatedError`→403, `ModelIntegrityError`→500.
-- `app/storage/models_dir.py` sandboxes `repo_id` `/` → `--` (Pitfall 4 mitigation; no path traversal — T-02-10).
-- Tests: `tests/test_manager_download.py` (4 tests) cover size+SHA fast-path, resume-after-crash, gated-repo → ModelGatedError, corrupt-SHA → ModelIntegrityError. All pass.
+- **Thread offload (root cause A fixed):** `app/models/manager.py:ensure_downloaded` wraps BOTH `hf_hub_download` calls (primary + bounded retry) in `asyncio.to_thread(...)`. AST gate (02-04 Task 1 `<verify><automated>`) prints `ok` — 0 direct `hf_hub_download` Call nodes, 2 offloaded calls. `import asyncio` is now at the module top.
+- **Classic non-Xet resume path forced (root cause B fixed):** `hf_xet=False` is passed to `hf_hub_download` when the installed version supports the kwarg (version-gated via `inspect.signature`, huggingface_hub>=0.26); on older versions `HF_HUB_DISABLE_XET=1` is set in `os.environ` around the call and restored in a `finally`. Verified by `grep -nE "hf_xet|HF_HUB_DISABLE_XET" app/models/manager.py` → hits at lines 264, 267, 331-332, 336, 340, 350-351, 357-358, 404, 406.
+- **WR-01 409 dedupe:** `app/api/routes_models.py:download_model` 409 branch (`_in_flight` state in `{queued, running}`) was correct but unreachable while the event loop was frozen; the thread offload alone makes it fire. Locked by `tests/test_download_routes.py::test_download_duplicate_in_flight_returns_409` (asserts `body.detail.error == "download_in_flight"`).
+- **WR-02 live SSE:** `tests/test_download_routes.py::test_download_progress_sse_streams_live` + `test_download_progress_byte_level` use the new `slow_mock_hf_hub_download` conftest fixture (a thread-blocking side_effect controlled by a `threading.Event`, writing byte increments every ~0.5s, released after ~6s) so the 5s `: ping` heartbeat at `routes_models.py:264` fires WHILE the download is in-flight. Both pass in the 188-test run.
+- **HW-09 resume:** `tests/test_download_routes.py::test_resume_after_crash_uses_classic_path` asserts `hf_hub_download` was called with `hf_xet=False` AND without `force_download`. The classic `.incomplete` + HTTP Range resume path the `_poll_bytes` scanner assumes now actually applies.
+- **SHA verification path unchanged:** `app/models/manager.py:_sha256_of_file` + the post-download SHA verify with bounded 1-retry → `ModelIntegrityError` (lines 370-399) are intact. `expected_sha256` is None for the current registry entries (deferred per `registry.py:20-23`), but the code path is present and test-covered (`tests/test_manager_download.py`).
+- **New AST source-contract guard:** `test_hf_hub_download_is_offloaded_to_thread` permanently locks the offload (a future regression to a direct sync call fails fast).
 
 ### SC-4: Loading blocks past 85% VRAM; unload explicit on idle; "what's in VRAM" indicator exposed
 
-**Status: PASS**
+**Status: PASS (gap closed by 02-05)**
 
-- `app/models/manager.py:383-404` `load` raises `VramBudgetExceeded(category, needed_mb, available_mb)` when `state.used_mb + expected_mb > vram_budget_fraction * total_mb`; route maps to 507.
-- `app/models/manager.py:430-446` `unload` is idempotent (D-03 explicit-only; no time-based timer); clears `live_vram_bytes` + `loaded_meta`; emits an `model_unloaded` log line. `unload_all()` snapshot-then-unload is used in lifespan teardown (`app/main.py:227`).
-- `app/models/vram.py` `probe_vram` returns a typed `VRAMState` with `total_mb`/`available_mb`/`used_mb`/`loaded`; `_loaded_list` prefers the real `LoadedModel` records from `ManagerState.loaded_meta`.
-- `GET /diagnostics/vram` returns the current VRAM state; `configure_manager` installs `manager._state` as the vram ManagerState singleton so the endpoint sees the live `loaded_meta`.
-- Tests: `tests/test_vram_budget.py` (3 tests) cover 507 refusal, 200 + LoadedModel, 204 idempotent unload + diagnostics reflection.
+- **CPU error-fallback fix (root cause D fixed):** Both CPU `except Exception:` fallbacks in `app/models/vram.py:probe_vram` (import-fail ~149-155, psutil-call-fail ~167-173) now return `loaded=_loaded_list(manager_state)` instead of `loaded=[]`. Source gate: `cpu_branch.count('loaded=[]') == 0` and `cpu_branch.count('loaded=_loaded_list(manager_state)') >= 3` → prints `ok`. Full-file grep: 8 `loaded=_loaded_list(manager_state)` hits (DIRECTML/VULKAN, CPU import-fail, CPU success, CPU psutil-call-fail, CUDA import-fail, CUDA not-available, CUDA success, CUDA exception); the only `loaded=[]` is in the module docstring (line 14, describing boot state). Uniform graceful degradation across every branch; `probe_vram` still never raises.
+- **psutil installed (root cause E fixed):** `pip install -e .` user_setup installed `psutil-7.2.2` (>= 5.9 declared in `pyproject.toml:24`). Verified by `python -c "import psutil; print(psutil.__version__)"` → `7.2.2`. Recorded in 02-05 SUMMARY "User setup" so env rebuilds preserve it.
+- **Live tests lock the contract:** `tests/test_diagnostics_api.py::test_get_vram_reflects_loaded_model_on_cpu` (psutil present, asserts `backend=="cpu"`, `total_mb > 0`, `len(loaded)==1`, `loaded[0].category=="stt"`); `test_get_vram_loaded_when_psutil_absent` (inline `no_psutil` fixture via `monkeypatch.setitem(sys.modules, "psutil", None)` — asserts `total_mb==0` AND `len(loaded)==1` — the exact UAT failure mode); `test_get_vram_empty_when_nothing_loaded` (regression guard). All three pass in the 188-test run.
+- **507 + idempotent 204 unload unchanged:** `tests/test_vram_budget.py` (3 tests) green.
+- The `no_psutil` + `cpu_manager` fixtures are defined INLINE in `tests/test_diagnostics_api.py` (not in conftest.py — 02-04 owns the conftest edit this wave); `cpu_manager` mirrors `configured_model_manager` but does NOT pull `mock_probe_vram` so the real CPU branch runs.
 
 ### SC-5: No two models resident concurrently unless the user opts in via a hidden-by-default settings toggle
 
-**Status: PASS**
+**Status: PASS (regression check — unchanged by 02-04/02-05)**
 
-- `app/models/settings.py` `concurrent_models: bool = False` (D-04 default-off; hidden by default). The field is in `UpdateSettingsRequest.properties` (verified live in OpenAPI).
-- `app/models/manager.py:375-381` `load` raises `ConcurrentModelRefused(loaded_category, requested_category)` when `concurrent_models=False` and a model is already resident; route maps to 409 with `fix="set concurrent_models=true in settings"`. Auto-swap is deliberately NOT Phase 2 behavior (D-04 — caller unloads first).
-- Tests: `tests/test_concurrent_models.py` (4 tests) cover default refuse (409), opt-in 200 via PATCH, OpenAPI exposure, unload-then-load.
+- `app/models/settings.py` `concurrent_models: bool = False` (D-04 default-off, hidden by default) unchanged.
+- `app/models/manager.py:load` `ConcurrentModelRefused` → 409 unchanged (the 02-04 edit was inside `ensure_downloaded`, not `load`).
+- `tests/test_concurrent_models.py` (4 tests) green.
 
 ---
 
@@ -86,15 +96,15 @@ re_verification: # No previous Phase 2 VERIFICATION.md existed; initial verifica
 
 | Requirement | Source Plan | Description | Status | Evidence |
 | ----------- | ---------- | ----------- | ------ | -------- |
-| HW-02 | 02-01, 02-02 | Transcription/diarization/LLM run on local models on GPU | SATISFIED (lifecycle layer) | ModelManager owns lifecycle (download/verify/load/unload/VRAM reservation). GPU inference execution is a later phase per the project's explicit deferral: REQUIREMENTS.md row HW-02 says "lifecycle in 02-02; actual GPU inference in Phase 3/7/8", and the 02-02 SUMMARY Known Stubs notes "the load is a typed VRAM reservation; Phase 3/7/8 adapters own the inference." The phase goal ("owns the lifecycle of every local model on disk and in VRAM") is achieved; real weight loading is intentionally out of scope for Phase 2. |
-| HW-03 | 02-01, 02-03 | App auto-detects GPU (CUDA vs ROCm vs CPU) on first run, configures backends silently | SATISFIED | `detect()` + `burn_test()` + lifespan first-boot write (02-01); `02-03-SPIKE.md` verdict `ROCM_FALLBACK_TO_CPU` is the empirical evidence on the actual desktop (the fallback chain is proven; per D-07 the code ships targeting the documented paths regardless). Contract guard test green. |
-| HW-04 | 02-02 | App downloads its own models on first run; user can swap model variants in settings | SATISFIED (download + swap mechanism) | `ensure_downloaded` via `hf_hub_download` (resumable); `per_category_overrides` + `active_model_set` resolver (override > preset, HW-06 mechanism); the settings-panel UI for swapping is Phase 10 (REQUIREMENTS.md maps HW-05/HW-06/HW-08 to Phase 10, not Phase 2). The Phase 2 contract is the download + the per-category override data layer, both present. |
-| HW-07 | 02-02 | Default model set fits the 8 GB laptop VRAM budget | SATISFIED | BALANCED triple (faster-whisper large-v3 + pyannote 3.1 + Qwen2.5-7B Q4_K_M) verified; budget math (0.85 × 8192 = 6963 MB ≥ 5.15 GB LLM estimate) holds; `tests/test_presets.py` green. |
-| HW-09 | 02-02 | Per-job VRAM discipline: on-demand load, idle unload, no concurrent multi-model residency | SATISFIED | `load` on demand (D-01), `unload` explicit-only idempotent (D-03), `ConcurrentModelRefused` 409 when `concurrent_models=False` (D-04). Tests green. |
+| HW-02 | 02-01, 02-02 | Transcription/diarization/LLM run on local models on GPU | SATISFIED (lifecycle layer) | ModelManager owns lifecycle (download/verify/load/unload/VRAM reservation). GPU inference execution is intentionally deferred to Phase 3/7/8 per REQUIREMENTS.md HW-02 row ("lifecycle in 02-02; actual GPU inference in Phase 3/7/8") and the 02-02 SUMMARY Known Stubs. The phase goal ("owns the lifecycle of every local model on disk and in VRAM") is achieved; real weight loading is out of scope for Phase 2. |
+| HW-03 | 02-01, 02-03 | App auto-detects GPU (CUDA vs ROCm vs CPU) on first run, configures backends silently | SATISFIED | `detect()` + `burn_test()` + lifespan first-boot write (02-01); `02-03-SPIKE.md` verdict `ROCM_FALLBACK_TO_CPU` is the empirical evidence on the actual desktop; the fallback chain is proven. Contract guard test green. |
+| HW-04 | 02-02 | App downloads its own models on first run; user can swap model variants in settings | SATISFIED (download + swap mechanism) | `ensure_downloaded` via `hf_hub_download` (resumable, now thread-offloaded + classic non-Xet path); `per_category_overrides` + `active_model_set` resolver (override > preset, HW-06 mechanism). The settings-panel UI for swapping is Phase 10 (REQUIREMENTS.md maps HW-05/HW-06/HW-08 to Phase 10). The Phase 2 contract is the download + the per-category override data layer, both present. |
+| HW-07 | 02-02, 02-05 | Default model set fits the 8 GB laptop VRAM budget | SATISFIED | BALANCED triple verified; budget math (0.85 × 8192 = 6963 MB ≥ 5.15 GB LLM estimate) holds; `tests/test_presets.py` green. 02-05 restored the SC-4 vram indicator that reports the loaded model on CPU (the HW-07 diagnostics surface). |
+| HW-09 | 02-02, 02-04 | Per-job VRAM discipline: on-demand load, idle unload, no concurrent multi-model residency | SATISFIED | `load` on demand (D-01), `unload` explicit-only idempotent (D-03), `ConcurrentModelRefused` 409 when `concurrent_models=False` (D-04). 02-04 closed the download-resume half of HW-09 (classic non-Xet `.incomplete` + Range path forced + thread offload so the 409 dedupe fires). Tests green. |
 
 ### Orphaned Requirements Check
 
-`REQUIREMENTS.md` traceability table maps exactly HW-02, HW-03, HW-04, HW-07, HW-09 to Phase 2 — no orphaned IDs. All five are claimed by the PLANs (02-01: HW-02, HW-03; 02-02: HW-02, HW-04, HW-07, HW-09; 02-03: HW-03). No orphans.
+`REQUIREMENTS.md` traceability table maps exactly HW-02, HW-03, HW-04, HW-07, HW-09 to Phase 2 — no orphaned IDs. All five are claimed by the PLANs (02-01: HW-02, HW-03; 02-02: HW-02, HW-04, HW-07, HW-09; 02-03: HW-03; 02-04: HW-09; 02-05: HW-07). No orphans.
 
 ---
 
@@ -102,28 +112,14 @@ re_verification: # No previous Phase 2 VERIFICATION.md existed; initial verifica
 
 | Artifact | Expected | Status | Details |
 | -------- | -------- | ------ | ------- |
-| `app/models/diagnostics.py` | Phase 2 typed surface (10 types) | VERIFIED | All 10 types import cleanly: GpuBackend, QualityPreset, ModelCategory, BackendProbe, VRAMState, LoadedModelInfo, HfTokenResult, GpuBurnResult, ModelSpec, ModelSet. |
-| `app/models/backend.py` | detect() + burn_test() | VERIFIED | `async def detect` + `async def burn_test` present; subprocess timeout=3 + try/except; lazy torch import. |
-| `app/models/vram.py` | probe_vram + ManagerState + set_manager_state | VERIFIED | `ManagerState` extended with `loaded_meta`; `probe_vram` two-pool fix; lazy torch/psutil import. |
-| `app/models/hf_token.py` | validate_token four-state shim | VERIFIED | `async def validate_token`; no `pyannote.audio` import (boundary). |
-| `app/models/settings.py` | 7 new Settings fields + strict UpdateSettingsRequest | VERIFIED | hf_token base64 round-trip verified (`aGZfYWJjMTIz` on disk, no cleartext); backend/backend_probe rejected by UpdateSettingsRequest; vram_budget_fraction range 0.1..0.95 enforced. |
-| `app/models/registry.py` | REGISTRY 9 entries + helpers | VERIFIED | 9 entries (3 presets × 3 categories); `get_spec` raises KeyError with valid-id list; `get_category` parses `<preset>.<category>`. |
-| `app/models/presets.py` | PRESETS + active_model_set | VERIFIED | BALANCED triple is the right repo_ids/file; override-wins resolver present. |
-| `app/storage/models_dir.py` | data_models_dir + spec_dir sandboxing | VERIFIED | `spec_dir` sandboxes `repo_id` `/` → `--`; `category_models_dir` validates isinstance. |
-| `app/models/manager.py` | ModelManager + 5 errors + singleton | VERIFIED | `ModelManager`, `VramBudgetExceeded`, `ConcurrentModelRefused`, `ModelGatedError`, `ModelIntegrityError`, `LoadedModel`, `DownloadProgress`, `ModelsListResponse`, `DownloadTaskResponse`, `get_manager`, `configure_manager` all importable; budget + concurrency logic present at lines 375-404. |
-| `app/api/routes_diagnostics.py` | 3 diagnostics routes | VERIFIED | All 3 routes registered in the app. |
-| `app/api/routes_models.py` | 6 model routes + error mapping | VERIFIED | All 6 routes registered; 507/409/403/500 mapping present. |
-| `app/main.py` | lifespan detect + configure_manager + teardown unload_all | VERIFIED | `backend_module.detect()` at line 120; `set_manager_state` at 180; `configure_manager(ModelManager(settings))` at 189; `await _get_manager().unload_all()` at 227; both routers registered at 329-330. |
-| `tests/test_gpu_detect.py` | 4 SC-1 tests | VERIFIED | 4 tests, pass. |
-| `tests/test_settings_phase2.py` | 8 strict-input/hot-swap tests | VERIFIED | 8 tests, pass. |
-| `tests/test_hf_token.py` | 5 four-state tests | VERIFIED | 5 tests, pass. |
-| `tests/test_diagnostics_api.py` | 4 diagnostics API tests | VERIFIED | 4 tests, pass. |
-| `tests/test_presets.py` | 4-6 preset tests | VERIFIED | 6 tests, pass. |
-| `tests/test_manager_download.py` | 4 download/verify tests | VERIFIED | 4 tests, pass. |
-| `tests/test_vram_budget.py` | 3 budget tests | VERIFIED | 3 tests, pass. |
-| `tests/test_concurrent_models.py` | 4 concurrency tests | VERIFIED | 4 tests, pass. |
-| `02-03-SPIKE.md` | 5-section spike + verdict | VERIFIED | All 5 sections present; verdict `VERDICT: ROCM_FALLBACK_TO_CPU`; Phase 3 "must" requirements present. |
-| `tests/test_spike_documented.py` | 4-assertion contract guard | VERIFIED | 4 tests, pass. |
+| `app/models/backend.py` | detect() + burn_test() | VERIFIED | unchanged by 02-04/02-05; regression-green. |
+| `app/models/vram.py` | probe_vram with uniform `loaded=_loaded_list(manager_state)` on every branch | VERIFIED | 02-05 fix: 8 hits of `loaded=_loaded_list(manager_state)`, 0 `loaded=[]` in CPU branch (only docstring hit). Source gate prints `ok`. |
+| `app/models/manager.py` | ensure_downloaded offloaded + classic non-Xet resume + SHA verify | VERIFIED | 02-04 fix: AST gate → 0 direct `hf_hub_download` calls, 2 `asyncio.to_thread` offloads, `hf_xet` + `HF_HUB_DISABLE_XET` present. SHA verify path at lines 370-399 intact. |
+| `app/api/routes_models.py` | 6 model routes + 409 dedupe + SSE + error mapping | VERIFIED | 409 dedupe at line 200 (`download_in_flight`); `_in_flight` dict at line 61; `asyncio.create_task(_run_download(...))` at line 212; SSE generator with `: ping` heartbeat. All 6 routes registered. |
+| `tests/test_download_routes.py` | 5 live-behavior tests for SC-3 | VERIFIED | 5 tests collected, all pass: `test_hf_hub_download_is_offloaded_to_thread` (AST guard), `test_download_duplicate_in_flight_returns_409` (WR-01), `test_download_progress_sse_streams_live` (WR-02 heartbeat), `test_download_progress_byte_level` (byte progress), `test_resume_after_crash_uses_classic_path` (HW-09). |
+| `tests/test_diagnostics_api.py` | 4 existing + 3 new SC-4 tests | VERIFIED | 7 tests collected, all pass: existing 4 + `test_get_vram_loaded_when_psutil_absent`, `test_get_vram_reflects_loaded_model_on_cpu`, `test_get_vram_empty_when_nothing_loaded`. |
+| `tests/conftest.py` | `slow_mock_hf_hub_download` fixture added; existing `mock_hf_hub_download` untouched | VERIFIED | `slow_mock_hf_hub_download` at line 269; `mock_hf_hub_download` at line 230 (untouched). |
+| `02-03-SPIKE.md` | 5-section spike + verdict | VERIFIED | unchanged; contract guard test green. |
 
 ---
 
@@ -131,16 +127,13 @@ re_verification: # No previous Phase 2 VERIFICATION.md existed; initial verifica
 
 | From | To | Via | Status | Details |
 | ---- | -- | --- | ------ | ------- |
-| `app/main.py` | `app/models/backend.py` | lifespan calls `backend_module.detect()` + `burn_test()` + atomic write | WIRED | `app/main.py:120` confirmed. |
-| `app/api/routes_diagnostics.py` | `app/models/backend.py` | `POST /diagnostics/gpu-burn` calls detect + burn + atomic write | WIRED | route present + registered. |
-| `app/models/vram.py` | `torch.cuda.mem_get_info` | `probe_vram` wraps the call; llm-pool sum is `manager_state.live_vram_bytes` | WIRED | two-pool fix in `probe_vram`. |
-| `app/models/hf_token.py` | `huggingface_hub.hf_hub_url` | `validate_token` does a HEAD call to HF Hub | WIRED | lazy import + `_hf_hub_url` seam. |
-| `app/models/manager.py` | `app/models/vram.py` | `ModelManager.load` calls `probe_vram` before loading | WIRED | `manager.py:383` `vram = probe_vram(settings.backend, self._state)`. |
-| `app/models/manager.py` | `huggingface_hub.hf_hub_download` | `ensure_downloaded` wraps `hf_hub_download` (resumable) | WIRED | `manager.py:284` lazy import. |
-| `app/api/routes_models.py` | `app/models/manager.py` | `POST /models/{id}/load` calls `manager.load`; 4 typed errors → HTTP codes | WIRED | `routes_models.py:202-234` mapping confirmed. |
-| `app/main.py` | `app/models/manager.py` | lifespan calls `configure_manager(ModelManager(...))` + teardown `unload_all` | WIRED | `app/main.py:189` + `:227`. |
-| `app/models/presets.py` | `app/models/settings.py` | `active_model_set(settings)` reads `quality_preset` + `per_category_overrides` | WIRED | resolver present, override > preset. |
-| `tests/test_spike_documented.py` | `02-03-SPIKE.md` | test reads the file and asserts each required heading | WIRED | 4 tests pass. |
+| `app/api/routes_models.py:_run_download` | `app/models/manager.py:ensure_downloaded` | `await manager.ensure_downloaded(spec, category)` which internally awaits `asyncio.to_thread(hf_hub_download, ...)` | WIRED | `routes_models.py:156` await + `manager.py:361/387` `asyncio.to_thread` confirmed. |
+| `app/api/routes_models.py:download_model` | `_in_flight` running-state check | HTTP 409 on duplicate in-flight | WIRED | `routes_models.py:200` `"error": "download_in_flight"`; locked by `test_download_duplicate_in_flight_returns_409`. |
+| `app/api/routes_diagnostics.py (GET /diagnostics/vram)` | `app/models/vram.py:probe_vram` | `probe_vram(backend, manager_state)` returns `VRAMState` with `loaded` populated from `manager_state` on EVERY branch | WIRED | 8 hits of `loaded=_loaded_list(manager_state)`; locked by `test_get_vram_reflects_loaded_model_on_cpu` + `test_get_vram_loaded_when_psutil_absent`. |
+| `app/models/vram.py CPU error-fallbacks` | `app.models.vram._loaded_list(manager_state)` | `loaded=_loaded_list(manager_state)` instead of `loaded=[]` | WIRED | 02-05 fix verified by source gate. |
+| `app/models/manager.py:ensure_downloaded` | `huggingface_hub.hf_hub_download` | `asyncio.to_thread(hf_hub_download, **_download_kwargs())` with `hf_xet=False` | WIRED | AST gate + `test_resume_after_crash_uses_classic_path`. |
+| `app/main.py` | `app/models/manager.py` | lifespan `configure_manager(ModelManager(...))` + teardown `unload_all` | WIRED | unchanged by 02-04/02-05. |
+| `app/models/presets.py` | `app/models/settings.py` | `active_model_set(settings)` reads `quality_preset` + `per_category_overrides` | WIRED | unchanged; resolver present. |
 
 ---
 
@@ -148,9 +141,9 @@ re_verification: # No previous Phase 2 VERIFICATION.md existed; initial verifica
 
 | Artifact | Data Variable | Source | Produces Real Data | Status |
 | -------- | ------------- | ------ | ------------------ | ------ |
-| `GET /models` `active_set` | `active_model_set(settings)` | `settings.quality_preset` + `per_category_overrides` → `PRESETS` dict → `REGISTRY` | Yes (9 real ModelSpec entries with real repo_ids) | FLOWING |
-| `GET /diagnostics/vram` `loaded` | `ManagerState.loaded_meta` | `ModelManager.load` records `LoadedModel` per category | Yes (populated by real load calls; empty by default — correct) | FLOWING |
-| `POST /models/{id}/download` | `hf_hub_download` | HuggingFace Hub (network) | Real (mocked in tests; production path is the real library call) | FLOWING |
+| `GET /diagnostics/vram` `loaded` | `ManagerState.loaded_meta` | `ModelManager.load` records `LoadedModel` per category; `_loaded_list(manager_state)` surfaces it on EVERY probe_vram branch | Yes (populated by real load calls; empty by default — correct) | FLOWING |
+| `POST /models/{id}/download` | `hf_hub_download` | HuggingFace Hub (network), thread-offloaded | Real (mocked in tests via `slow_mock_hf_hub_download` + `mock_hf_hub_download`; production path is the real library call) | FLOWING |
+| `GET /models/{id}/download-progress` SSE | `_in_flight[id]` + `_poll_bytes` scanner | `DownloadProgress` updated by background task + `.incomplete` byte scanner | Real (mocked with incremental byte writes in `slow_mock_hf_hub_download`) | FLOWING |
 | `POST /diagnostics/gpu-burn` `probe` | `backend.detect()` + `burn_test()` | Subprocess + lazy torch on the real box | Yes (real-kernel matmul; CPU returns nulls per D-06) | FLOWING |
 
 ---
@@ -159,19 +152,18 @@ re_verification: # No previous Phase 2 VERIFICATION.md existed; initial verifica
 
 | Behavior | Command | Result | Status |
 | -------- | ------- | ------ | ------ |
-| All types import cleanly | `python -c "from app.models.diagnostics import ...; from app.models.manager import ...; ..."` | OK | PASS |
-| BALANCED triple is the right repo_ids | direct import of `PRESETS[QualityPreset.BALANCED]` | `Systran/faster-whisper-large-v3` / `pyannote/speaker-diarization-3.1` / `qwen2.5-7b-instruct-q4_k_m.gguf` | PASS |
-| hf_token base64 on disk, no cleartext | `Settings(... hf_token='hf_abc123').model_dump_json()` | contains `aGZfYWJjMTIz`, NOT `hf_abc123` | PASS |
-| UpdateSettingsRequest rejects backend | `UpdateSettingsRequest(backend='cuda')` | `ValidationError` | PASS |
-| vram_budget_fraction range enforced | `UpdateSettingsRequest(vram_budget_fraction=1.5)` | `ValidationError` | PASS |
-| OpenAPI exposes all 10 new schemas | `app.openapi()['components']['schemas']` | all 10 present | PASS |
-| UpdateSettingsRequest has no backend/backend_probe | OpenAPI properties | `backend`/`backend_probe` absent; `concurrent_models` present | PASS |
-| All 9 routes registered | `app.routes` paths | all 9 present (3 diagnostics + 6 models) | PASS |
-| huggingface_hub boundary | `grep "from huggingface_hub" app/` | only `hf_token.py` + `manager.py` (line 38 is a docstring comment) | PASS |
-| Full test suite green | `pytest -q` | 155 passed in 99.36s | PASS |
-| Spike contract guard green | `pytest tests/test_spike_documented.py -q` | 4 passed | PASS |
-| Manager load wiring | grep `probe_vram(`/`VramBudgetExceeded`/`ConcurrentModelRefused` in `manager.py` | lines 383/389/377 — budget + concurrency gates present | PASS |
-| Routes error mapping | grep `status_code=507/409/403/500` in `routes_models.py` | all four present | PASS |
+| AST gate: 0 direct hf_hub_download, 2 offloaded, xet disabled | `python -c "import ast; ..."` (02-04 Task 1 verify) | `direct calls: 0 / offloaded calls: 2 / hf_xet: True / HF_HUB_DISABLE_XET: True / asyncio imported: True` | PASS |
+| vram.py CPU branch: no `loaded=[]`, ≥3 `_loaded_list` | `python -c "src=open(...); cpu=src[...]; assert cpu.count('loaded=[]')==0; assert cpu.count('loaded=_loaded_list(manager_state)')>=3; print('ok')"` | `ok` | PASS |
+| Full-file `loaded=_loaded_list(manager_state)` hits | `grep -nE "loaded=_loaded_list\(manager_state\)" app/models/vram.py` | 8 hits (lines 143, 154, 164, 172, 184, 194, 206, 214) | PASS |
+| `loaded=[]` only in docstring | `grep -nE "loaded=\[\]" app/models/vram.py` | 1 hit at line 14 (module docstring, boot state) — 0 in code paths | PASS |
+| New SC-3 tests exist | `pytest tests/test_download_routes.py --collect-only` | 5 tests collected | PASS |
+| New SC-4 tests exist | `pytest tests/test_diagnostics_api.py --collect-only` | 7 tests collected (4 existing + 3 new) | PASS |
+| Targeted SC-3 + SC-4 tests | `pytest tests/test_download_routes.py tests/test_diagnostics_api.py -q` | 12 passed in 64.77s | PASS |
+| Full test suite | `python -m pytest -q` | 188 passed in 295.02s | PASS |
+| psutil installed in runtime env | `python -c "import psutil; print(psutil.__version__)"` | `7.2.2` (>= 5.9) | PASS |
+| SHA256 verify path present | `grep -nE "sha256|ModelIntegrityError" app/models/manager.py` | `_sha256_of_file` at line 192; post-download verify at 370-399; `ModelIntegrityError` at 119 | PASS |
+| No debt markers in modified files | `grep -nE "TBD|FIXME|XXX|TODO|HACK|PLACEHOLDER" app/models/manager.py app/api/routes_models.py app/models/vram.py tests/conftest.py tests/test_download_routes.py tests/test_diagnostics_api.py` | 0 hits | PASS |
+| Gap-closure commits present | `git log --oneline -15` | 243362b, 7dc1dec, eae3776 (02-04); 9f07bc8, f0b7608, fec16e7 (02-05) all present | PASS |
 
 ---
 
@@ -179,44 +171,69 @@ re_verification: # No previous Phase 2 VERIFICATION.md existed; initial verifica
 
 | Probe | Command | Result | Status |
 | ----- | ------- | ------ | ------ |
-| `tests/test_spike_documented.py` | `python -m pytest tests/test_spike_documented.py -q` | 4 passed | PASS |
-| Full suite | `python -m pytest -q` | 155 passed | PASS |
+| SC-3 + SC-4 targeted suite | `pytest tests/test_download_routes.py tests/test_diagnostics_api.py -q` | 12 passed in 64.77s | PASS |
+| Full suite | `python -m pytest -q` | 188 passed in 295.02s (0 failed, 0 skipped) | PASS |
+| AST source-contract gate (02-04 Task 1) | `python -c "import ast; ..."` | `ok` (0 direct, 2 offloaded, xet disabled) | PASS |
+| vram.py CPU branch gate (02-05 Task 1) | `python -c "...assert cpu.count('loaded=[]')==0; assert cpu.count('loaded=_loaded_list(manager_state)')>=3; print('ok')"` | `ok` | PASS |
 
 ---
 
 ## 8. Anti-Patterns Scan
 
-No blockers found.
+No blocker debt markers (`TBD`/`FIXME`/`XXX`) in any Phase 2 file modified this wave. No `TODO`/`HACK`/`PLACEHOLDER` either.
 
 | File | Line | Pattern | Severity | Impact |
 | ---- | ---- | ------- | -------- | ------ |
-| `app/models/vram.py` | `_loaded_list` | `"<category>:unknown"` placeholder model_id | INFO | Documented in 02-01 SUMMARY Known Stubs; 02-02's `loaded_meta` overrides it when a real model is loaded. The `loaded` list is empty by default so the placeholder only surfaces in contrived test paths. Not a stub that prevents the goal. |
+| `app/models/manager.py` | 357-406 | `HF_HUB_DISABLE_XET` env var mutated from concurrent worker threads with no lock (CR-01 from 02-REVIEW.md) | WARNING (open concurrency risk) | See §9 Open Concurrency Risk Note. NOT a hard gap: the single-download contract (one user, one model at a time, loopback box) holds; the env-var save/restore is correct for the single-thread case. The `hf_xet=False` kwarg is per-call and thread-safe, so on huggingface_hub>=0.26 the env-var path is a redundant belt-and-suspenders fallback. |
+| `app/api/routes_models.py` | 212 | Fire-and-forget `asyncio.create_task` with no stored reference (WR-01 from 02-REVIEW.md) | WARNING (robustness) | CPython's asyncio docs warn the task can be GC'd mid-download. Not exercised by current tests. Does not break the SC-3 contract under single-download use. |
+| `app/api/routes_models.py` | 155-176 | `_run_download` does not set `progress.state` on `asyncio.CancelledError` (WR-02 from 02-REVIEW.md) | WARNING (robustness) | On cancellation the SSE client hangs on a "running" frame. Not exercised by current tests; cancellation is not in the SC-3 contract. |
+| `tests/test_download_routes.py` | 122-165, 176-220 | Live SSE tests depend on real 5-7s wall-clock timers (WR-05 from 02-REVIEW.md) | INFO (test flakiness risk) | Tests pass on this machine (64.77s for 12 tests). May flake on a loaded CI runner; not a goal blocker. |
 
-No `TBD` / `FIXME` / `XXX` debt markers in any Phase 2 file. The `ModelManager.load` is a typed VRAM reservation by design (not a stub) — Phase 3/7/8 adapters own the real weight loading; this is documented in the plan and the 02-02 SUMMARY Known Stubs and is the intentional deferral of HW-02's GPU-inference-execution layer.
-
----
-
-## 9. Human Verification Required
-
-None. All Phase 2 success criteria are observable via tests + live OpenAPI + source inspection. The one inherently-human step (running the ROCm spike on the physical desktop) was already performed by the user and recorded in `02-03-SPIKE.md` with verbatim terminal output; the contract guard test enforces its presence. No additional human verification is required for Phase 2 closure.
+No `TBD` / `FIXME` / `XXX` debt markers. The `ModelManager.load` is a typed VRAM reservation by design (not a stub) — Phase 3/7/8 adapters own the real weight loading; this is the intentional deferral of HW-02's GPU-inference-execution layer.
 
 ---
 
-## 10. Deferred Items (Step 9b)
+## 9. Open Concurrency Risk Note (CR-01)
+
+**Item:** `app/models/manager.py:357-406` sets `os.environ["HF_HUB_DISABLE_XET"] = "1"` before `await asyncio.to_thread(hf_hub_download, ...)` and restores it in a `finally`. `asyncio.to_thread` runs the body on the default `ThreadPoolExecutor`, so two concurrent downloads (e.g. `POST /models/small.stt/download` and `POST /models/balanced.llm/download` issued back-to-back) execute in two worker threads simultaneously. The save/restore is per-call and unsynchronized: thread A's `finally` can `pop` the env var while thread B is still inside `hf_hub_download`, silently re-enabling the Xet backend for B's download — exactly the HW-09 regression 02-04 was written to prevent.
+
+**Classification:** Verified-in-single-thread / open-concurrency-risk — NOT a hard gap.
+
+**Reasoning:**
+- The phase goal's "model download with SHA verification" + HW-09 "resume after crash" contract is a single-user, single-model-at-a-time contract on a loopback box. The SC-5 concurrent_models=False default (D-04) means the manager refuses a second model load while one is resident; download concurrency is not a stated SC-3 requirement.
+- The single-download path (the contract being verified) is correct: the env var is set before the call, restored after, and the `hf_xet=False` kwarg is also passed (per-call, thread-safe) on huggingface_hub>=0.26. The integration tests (`test_resume_after_crash_uses_classic_path`, `test_download_duplicate_in_flight_returns_409`) pass.
+- The 02-REVIEW.md recommended fix is a one-liner: `os.environ.setdefault("HF_HUB_DISABLE_XET", "1")` at module load / lifespan startup, removing the save/restore block. This is a robustness improvement, not a goal blocker.
+
+**Recommendation:** Address CR-01 in a future robustness pass (Phase 3 download orchestration, or a Phase 2.6 hardening plan) alongside WR-01 (fire-and-forget task ref) and WR-02 (CancelledError handling). Until then, the app's documented usage pattern (one download at a time) is safe.
+
+---
+
+## 10. Human Verification Required
+
+None required for phase closure. The two UAT gaps (SC-3, SC-4) were live-confirmed by the user in `02-UAT.md` (the failure modes were observed live), and the gap-closure fixes are locked by integration-level tests that reproduce the exact failure modes (`test_get_vram_loaded_when_psutil_absent` reproduces the SC-4 UAT trigger; `test_download_duplicate_in_flight_returns_409` + `test_download_progress_sse_streams_live` reproduce the SC-3 UAT trigger via the slow in-flight mock). The previous V-UAT live boot was the human confirmation; the fixes restore the contract the human originally verified.
+
+Optional (not blocking) live re-confirmation: `uvicorn app.main:app`, POST `/models/small.stt/download` → 202, immediately POST again → 409, GET `/models/small.stt/download-progress` shows live `event: progress` + `: ping` lines while downloading; POST `/models/small.stt/load` → 200, GET `/diagnostics/vram` → `loaded:[{category:stt,...}]` with `total_mb > 0`. This is the same live check the 02-04 and 02-05 SUMMARYs mark as "post-execute, not run by the executor"; the integration tests cover the same contract.
+
+---
+
+## 11. Deferred Items (Step 9b)
 
 | # | Item | Addressed In | Evidence |
 |---|------|-------------|----------|
 | 1 | Real GPU weight loading (faster-whisper / llama-cpp-python / pyannote.audio inference execution) | Phase 3 / 7 / 8 | ROADMAP Phase 3 goal: "proves the GPU abstraction works"; Phase 7 "pyannote adapter"; Phase 8 "llama-cpp-python adapter". REQUIREMENTS.md HW-02 row: "actual GPU inference in Phase 3/7/8". 02-02 SUMMARY Known Stubs documents this explicitly. |
 | 2 | Prefetch-at-submit + auto-swap load policy | Phase 4 | 02-02 PLAN: "prefetch-at-job-submit (per D-02 just-in-time at stage start is a Phase 4 orchestrator concern; Phase 2 is the mechanism, Phase 4 is the policy)". ROADMAP Phase 4: "Job Orchestrator + Persistent Queue". |
 | 3 | Settings panel UI for quality preset + per-category override + concurrent_models toggle | Phase 10 | ROADMAP Phase 10 goal: "Settings Panel + Quality Preset + Per-Category Overrides". REQUIREMENTS.md maps HW-05/HW-06/HW-08 to Phase 10. Phase 2 ships the data layer (`per_category_overrides`, `active_model_set`, `concurrent_models`), not the UI. |
+| 4 | CR-01 concurrency hardening (HF_HUB_DISABLE_XET lock) + WR-01/WR-02 download-task robustness | Robustness pass (Phase 3 or Phase 2.6) | 02-REVIEW.md §Critical + §Warnings. The single-download contract holds; concurrent download hardening is a robustness improvement, not a Phase 2 SC. |
 
 ---
 
-## 11. Gaps Summary
+## 12. Gaps Summary
 
-No gaps. All 5 ROADMAP success criteria pass; all 5 phase requirements are satisfied (HW-02 at the lifecycle layer per the project's explicit deferral; the rest end-to-end); all artifacts exist, are substantive, and are wired; data flows are real; the full suite is green (155 passed); the boundary checks are clean; the 02-03 spike verdict is valid empirical evidence for HW-03 per D-07.
+No gaps. All 5 ROADMAP success criteria pass (SC-3 + SC-4 gaps from 02-UAT.md closed by 02-04 + 02-05); all 5 phase requirements are satisfied (HW-02 at the lifecycle layer per the project's explicit deferral; the rest end-to-end); all artifacts exist, are substantive, and are wired; data flows are real; the full suite is green (188 passed, +33 from the 155 baseline: 5 new SC-3 tests + 3 new SC-4 tests + 25 from other phase work); the boundary checks are clean; no debt markers; the 02-03 spike verdict is valid empirical evidence for HW-03 per D-07.
+
+The one open item (CR-01 concurrency risk in `HF_HUB_DISABLE_XET` save/restore) is recorded as a verified-in-single-thread / open-concurrency-risk NOTE, not a gap: the single-download HW-09 contract holds and is test-locked; concurrent download hardening is deferred to a future robustness pass.
 
 ---
 
-_Verified: 2026-06-18_
+_Verified: 2026-06-19_
 _Verifier: Claude (gsd-verifier)_
