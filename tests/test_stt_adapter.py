@@ -1,4 +1,4 @@
-"""Tests for ``FasterWhisperAdapter`` (Phase 3 plan 03-01).
+"""Tests for ``FasterWhisperAdapter`` (Phase 3 plans 03-01 + 03-02).
 
 Cases:
 
@@ -21,6 +21,14 @@ Cases:
   ``int8 -> int8_float16`` substitution is accepted by ``_ACCEPTED``).
   Also asserts ``requested="int8_float16"`` + ``actual="int8_float16"`` is
   accepted.
+- ``test_decode_audio_returns_stubbed_array`` (03-02, W3): under the
+  03-01 ``mock_stt_adapter`` fixture (which patches
+  ``faster_whisper.audio.decode_audio`` to a stub returning
+  ``fake_audio_array``), ``FasterWhisperAdapter.decode_audio("any.wav")``
+  returns the stubbed numpy array. Proves the lazy
+  ``from faster_whisper.audio import decode_audio`` inside
+  ``adapter.py`` resolves under the seam (W3) and the SC-4 grep boundary
+  still matches only ``adapter.py``.
 """
 
 from __future__ import annotations
@@ -92,3 +100,26 @@ def test_int8_equivalence_accepted(mock_stt_adapter, fake_audio_array):
     # requested=int8_float16, actual=int8_float16 (exact match).
     adapter2 = _adapter(mock_stt_adapter, compute_type="int8_float16")
     adapter2.load()  # must not raise
+
+
+def test_decode_audio_returns_stubbed_array(mock_stt_adapter, fake_audio_array):
+    """03-02, W3: FasterWhisperAdapter.decode_audio resolves the lazy import under the seam.
+
+    Under the 03-01 ``mock_stt_adapter`` fixture (which patches
+    ``faster_whisper.audio.decode_audio`` to return ``fake_audio_array``),
+    ``FasterWhisperAdapter.decode_audio("any.wav")`` returns the stubbed
+    numpy array (shape ``(16000 * 30,)`` float32, all zeros). This proves
+    the lazy ``from faster_whisper.audio import decode_audio`` inside
+    ``adapter.py`` resolves under the seam, so the chunker can route
+    decoding through the Protocol (preserving SC-4: the grep boundary
+    still matches only ``app/models/stt/adapter.py``).
+    """
+    import numpy as np  # type: ignore[import-not-found]
+
+    adapter = _adapter(mock_stt_adapter, compute_type="int8_float16")
+    # decode_audio is the 03-02 Protocol addition.
+    result = adapter.decode_audio("any.wav")
+    assert isinstance(result, np.ndarray)
+    assert result.shape == (16000 * 30,)
+    assert result.dtype == np.float32
+    np.testing.assert_array_equal(result, fake_audio_array)
