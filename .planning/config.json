@@ -20,7 +20,8 @@
   },
   "review": {
     "default_reviewers": [
-      "codex"
+      "codex",
+      "gemini"
     ]
   }
 }
