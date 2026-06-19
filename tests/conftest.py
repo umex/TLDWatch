@@ -250,7 +250,10 @@ def mock_hf_hub_download(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         size = 0
         for spec in REGISTRY.values():
-            if spec.repo_id == repo_id and (spec.file or "model.bin") == filename:
+            # Match the filename derivation in ``spec_file_path``:
+            # ``spec.file or f"{repo_id.replace('/', '--')}.bin"``.
+            expected_fn = spec.file or f"{spec.repo_id.replace('/', '--')}.bin"
+            if spec.repo_id == repo_id and expected_fn == filename:
                 size = spec.expected_size_bytes or 0
                 break
         with out_path.open("wb") as fh:
@@ -260,6 +263,91 @@ def mock_hf_hub_download(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     mock = MagicMock(side_effect=_default_download)
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", mock)
     return mock
+
+
+@pytest.fixture
+def slow_mock_hf_hub_download(
+    monkeypatch: pytest.MonkeyPatch,
+) -> SimpleNamespace:
+    """A SLOW in-flight mock for ``huggingface_hub.hf_hub_download``.
+
+    Unlike ``mock_hf_hub_download`` (synchronous, returns immediately),
+    this fixture's side_effect is a plain ``def`` that STAYS IN-FLIGHT
+    until a ``threading.Event`` (``release_event``) is set. While
+    in-flight it writes byte increments to ``<filename>.incomplete``
+    every ~0.5s so the SSE generator's bytes-change throttle emits real
+    ``event: progress`` frames with strictly increasing ``bytes_done``,
+    and so the 5s ``: ping`` heartbeat (``routes_models.py:264``) fires
+    WHILE the download is still running. Once released, the side_effect
+    finalizes the file at the full ``expected_size_bytes`` and renames
+    ``.incomplete`` to the final filename.
+
+    The side_effect is a plain ``def`` (NOT ``async def``) because
+    ``asyncio.to_thread`` runs it in a worker thread -- blocking with
+    ``time.sleep`` and ``release_event.wait`` is correct there.
+
+    Returns a :class:`types.SimpleNamespace` with:
+    - ``release_event``: a ``threading.Event`` the test sets (or
+      schedules via ``threading.Timer``) to release the download.
+    - ``mock``: the ``MagicMock`` installed on
+      ``huggingface_hub.hf_hub_download``.
+
+    On teardown the fixture sets ``release_event`` so a forgotten
+    release cannot hang the worker thread across tests.
+    """
+    import threading
+    import time
+
+    import huggingface_hub  # type: ignore[import-not-found]
+    from app.models.registry import REGISTRY
+
+    release_event = threading.Event()
+
+    def _slow_download(*, repo_id, filename, revision, local_dir, token, **_kwargs):
+        from pathlib import Path
+
+        out_path = Path(local_dir) / filename
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        inc_path = out_path.with_name(out_path.name + ".incomplete")
+        # Resolve the expected size from the registry (same lookup as
+        # the synchronous mock_hf_hub_download fixture). Match the
+        # filename derivation in ``spec_file_path``.
+        size = 0
+        for spec in REGISTRY.values():
+            expected_fn = spec.file or f"{spec.repo_id.replace('/', '--')}.bin"
+            if spec.repo_id == repo_id and expected_fn == filename:
+                size = spec.expected_size_bytes or 0
+                break
+        # Write byte increments every ~0.5s across the in-flight window
+        # so ``event: progress`` frames keep flowing while the 5s
+        # heartbeat accumulates. ~20 increments covers the full size.
+        chunk = max(size // 20, 1)
+        written = 0
+        # Truncate any stale .incomplete so the byte count is clean.
+        inc_path.write_bytes(b"")
+        while not release_event.is_set():
+            if written < size:
+                with inc_path.open("ab") as fh:
+                    fh.write(b"x" * min(chunk, size - written))
+                written += min(chunk, size - written)
+            time.sleep(0.5)
+        # Released -- finalize the file at the full expected size and
+        # rename .incomplete to the final filename.
+        if written < size:
+            with inc_path.open("ab") as fh:
+                fh.write(b"x" * (size - written))
+            written = size
+        inc_path.replace(out_path)
+        return str(out_path)
+
+    mock = MagicMock(side_effect=_slow_download)
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", mock)
+    try:
+        yield SimpleNamespace(release_event=release_event, mock=mock)
+    finally:
+        # Never let a forgotten release hang the worker thread across
+        # tests.
+        release_event.set()
 
 
 @pytest_asyncio.fixture

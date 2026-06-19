@@ -315,7 +315,16 @@ class ModelManager:
         )
 
         token = _get_token()
-        filename = spec.file or "model.bin"
+        # Use the target's basename as the download filename so it
+        # matches ``spec_file_path`` exactly -- including the
+        # ``<sanitized_repo_id>.bin`` fallback used when ``spec.file``
+        # is None (e.g. ``small.stt`` -> ``Systran--faster-whisper-small.bin``).
+        # Without this, the download writes to ``model.bin`` while the
+        # size fast-path + the ``_poll_bytes`` scanner look for the
+        # spec-derived name, so resume + byte progress silently break
+        # for every spec with ``file=None`` (Rule 1 fix found by the
+        # new live SSE test).
+        filename = target.name
         revision = spec.revision or "main"
 
         # Detect whether the installed huggingface_hub supports the
