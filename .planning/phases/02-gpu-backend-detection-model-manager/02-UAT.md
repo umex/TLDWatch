@@ -1,12 +1,14 @@
 ---
-status: diagnosed
+status: resolved
 phase: 02-gpu-backend-detection-model-manager
 source:
   - 02-01-SUMMARY.md
   - 02-02-SUMMARY.md
   - 02-03-SUMMARY.md
+  - 02-04-SUMMARY.md
+  - 02-05-SUMMARY.md
 started: 2026-06-18T22:55:27.046Z
-updated: 2026-06-19T05:44:59.000Z
+updated: 2026-06-19T07:40:00.000Z
 mode: goal-backward
 note: >
   Phase 2 is a back-end/infrastructure phase (GPU detection + model lifecycle; no UI,
@@ -105,7 +107,8 @@ skipped: 0
 ## Gaps
 
 - truth: "POST /models/{id}/download returns 202; GET /download-progress streams event:progress with a :ping heartbeat and byte-level progress (WR-02); duplicate in-flight downloads are refused with 409 (WR-01); downloads resume after a mid-download crash (HW-09)."
-  status: failed
+  status: resolved
+  resolved_by: "02-04 — hf_hub_download offloaded via asyncio.to_thread (event loop unfrozen) + classic non-Xet resume path forced (hf_xet=False / HF_HUB_DISABLE_XET=1); 5 live tests (409, live SSE, byte progress, resume). Verified 2026-06-19."
   reason: "User reported: 1 works, 2 never triggers, 3 and 4 request gets through only after model is downloaded, 5 worked, 6 canceled mid download got error it didnt resume. KeyboardInterrupt traceback in xet_get -> hf_hub_download during _run_download -> ensure_downloaded."
   severity: blocker
   test: 4
@@ -122,7 +125,8 @@ skipped: 0
   debug_session: ""
 
 - truth: "GET /diagnostics/vram reflects the currently-loaded model(s); on CPU the loaded list is populated from manager_state (WR-03)."
-  status: failed
+  status: resolved
+  resolved_by: "02-05 — CPU error-fallbacks now return loaded=_loaded_list(manager_state); psutil installed in runtime env (7.2.2); 3 live tests (loaded-on-cpu, psutil-absent graceful degradation, empty-state). Verified 2026-06-19."
   reason: "User reported: loaded is empty right after a 200 load (GET /diagnostics/vram -> {backend:cpu,total_mb:0,available_mb:0,used_mb:0,loaded:[]}). load returned 200 with vram_bytes=1.5GB; unload 204 idempotent worked."
   severity: major
   test: 5
