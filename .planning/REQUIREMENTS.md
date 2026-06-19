@@ -13,7 +13,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **INGEST-02**: User can submit a single YouTube video URL
 - [ ] **INGEST-03**: User can submit a YouTube playlist URL
 - [ ] **INGEST-04**: App downloads YouTube audio locally and processes it from scratch (no reliance on YouTube's auto-captions)
-- [ ] **INGEST-05**: App handles long videos by chunking audio automatically, with fallback when a single-shot job would OOM
+- [x] **INGEST-05**: App handles long videos by chunking audio automatically, with fallback when a single-shot job would OOM
 - [x] **INGEST-06**: App auto-detects the spoken language from the audio
 
 ### Job Management
@@ -129,7 +129,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INGEST-02 | Phase 6 | Pending |
 | INGEST-03 | Phase 6 | Pending |
 | INGEST-04 | Phase 6 | Pending |
-| INGEST-05 | Phase 3 | Pending |
+| INGEST-05 | Phase 3 | Complete |
 | INGEST-06 | Phase 3 | Complete |
 | JOB-01 | Phase 6 | Pending |
 | JOB-02 | Phase 4 | Pending |

@@ -104,7 +104,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 03-02-PLAN.md — Audio chunker (decode once, ≤30min single call, >30min windowed + overlap + OOM halve-and-retry + midpoint stitch) (autonomous; INGEST-05)
+- [x] 03-02-PLAN.md — Audio chunker (decode once, ≤30min single call, >30min windowed + overlap + OOM halve-and-retry + midpoint stitch) (autonomous; INGEST-05)
 
 **Wave 3** *(blocked on Wave 2)*
 
@@ -273,7 +273,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 |-------|----------------|--------|-----------|
 | 1. Back-end Skeleton + Storage + Data Layout | 3/3 | Complete   | 2026-06-14 |
 | 2. GPU Backend Detection + Model Manager | 5/5 | Complete    | 2026-06-19 |
-| 3. STT Adapter + Audio Chunker + Standalone CLI | 1/3 | In Progress|  |
+| 3. STT Adapter + Audio Chunker + Standalone CLI | 2/3 | In Progress|  |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 0/3 | Not started | - |
 | 5. Local File Ingest + History UI + 3-Pane Layout | 0/3 | Not started | - |
 | 6. YouTube Ingest + Sequential Playlist Queue | 0/3 | Not started | - |

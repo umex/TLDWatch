@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: context exhaustion at 76% (2026-06-19)
-last_updated: "2026-06-19T10:11:44.491Z"
+last_updated: "2026-06-19T10:33:25.908Z"
 last_activity: 2026-06-19 -- Phase 03 execution started
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 20
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 03 (stt-adapter-audio-chunker-standalone-cli) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-06-19 -- Phase 03 execution started
 
@@ -55,6 +55,7 @@ Progress: [██████░░░░░░] 16%
 *Updated after each plan completion*
 | Phase 02 P05 | 12 | 2 tasks | 2 files |
 | Phase 03 P01 | 6m | 2 tasks | 8 files |
+| Phase 03 P02 | 20m | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -73,6 +74,10 @@ Recent decisions affecting current work:
 - [Phase ?]: 03-01: SttSegment mirrors TranscriptSegment shape but is a separate type (D-06 layering)
 - [Phase ?]: 03-01: [project.scripts] transcribe deferred to 03-03; nvidia-cu12 libs deferred to SC-5 (Codex HIGH)
 - [Phase ?]: 03-01: D-08 _ACCEPTED table accepts CUDA int8->int8_float16, rejects float32 fallback; FasterWhisperAdapter is the ONLY fw/ct2 import site (SC-4)
+- [Phase ?]: 03-02: Overlap-dedupe drops later-chunk segments whose abs start_s < prev_chunk_end; NO timestamp mutation (Codex HIGH stitch fix)
+- [Phase ?]: 03-02: OOM split-both-halves recursive retry transcribes BOTH halves (Codex HIGH full-coverage fix); FLOOR_SECONDS=60 bounds depth at ~4 (T-03-04)
+- [Phase ?]: 03-02: STTAdapter Protocol gained decode_audio so the chunker decodes without importing faster_whisper (SC-4 preserved)
+- [Phase ?]: 03-02: condition_on_previous_text=False per chunk (chunked), True (<=30 min fast path) -- Pitfall 8 planner decision
 
 ### Pending Todos
 
@@ -104,7 +109,7 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-19T10:11:44.485Z
+Last session: 2026-06-19T10:33:25.901Z
 Stopped at: context exhaustion at 76% (2026-06-19)
 Resume file: .planning/phases/03-stt-adapter-audio-chunker-standalone-cli/03-CONTEXT.md
 
