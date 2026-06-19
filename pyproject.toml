@@ -35,6 +35,13 @@ dependencies = [
     "ctranslate2==4.7.2",
 ]
 
+# Phase 3 (03-03): declare the `transcribe` console_scripts entry point HERE,
+# not in 03-01. Per Codex HIGH: declaring it before app.cli.transcribe exists
+# breaks editable installs / smoke tests in Waves 1-2. The entry point ships
+# alongside the module it references.
+[project.scripts]
+transcribe = "app.cli.transcribe:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8",

@@ -57,14 +57,31 @@ from app.models.transcript import Transcript, TranscriptSegment
 # --- helpers ---------------------------------------------------------------
 
 
-def _make_transcript(language: str = "en") -> Transcript:
+def _make_transcript(language: str = "en", job_id: str = "test") -> Transcript:
     """Build a minimal Transcript for the mocked ``transcribe_file``."""
     return Transcript(
         schema_version=1,
-        job_id="test",
+        job_id=job_id,
         language=language,
         segments=[TranscriptSegment(start_s=0.0, end_s=1.0, text="hi")],
     )
+
+
+def _transcribe_factory():
+    """Return a ``transcribe_file`` mock that mirrors the real chunker's job_id wiring.
+
+    The real ``transcribe_file`` builds ``Transcript(job_id=job_id, ...)`` from
+    the kwarg it receives. The plain ``MagicMock(return_value=...)`` ignores
+    the kwarg, so tests that assert the persisted ``job_id`` (e.g.
+    ``test_atomic_write_called``) would see the mock's hardcoded value. This
+    factory returns a mock whose side effect reads the ``job_id`` kwarg and
+    builds the Transcript from it, matching the real behavior.
+    """
+
+    def _impl(adapter, audio_path, *, language=None, job_id="cli"):
+        return _make_transcript(job_id=job_id, language=language or "en")
+
+    return MagicMock(side_effect=_impl)
 
 
 def _make_settings(backend: GpuBackend = GpuBackend.CPU) -> object:
@@ -113,11 +130,14 @@ def _patch_happy_path(
     monkeypatch.setattr("app.cli.transcribe.FasterWhisperAdapter", fw_mock)
 
     # transcribe_file seam.
-    if transcribe_return is None:
-        transcribe_return = _make_transcript()
-    transcribe_mock = MagicMock(
-        return_value=transcribe_return, side_effect=transcribe_side_effect
-    )
+    if transcribe_side_effect is not None:
+        transcribe_mock = MagicMock(side_effect=transcribe_side_effect)
+    elif transcribe_return is not None:
+        transcribe_mock = MagicMock(return_value=transcribe_return)
+    else:
+        # Default: mirror the real chunker's job_id wiring so assertions on
+        # the persisted payload (job_id, language) reflect the CLI's kwargs.
+        transcribe_mock = _transcribe_factory()
     monkeypatch.setattr("app.cli.transcribe.transcribe_file", transcribe_mock)
 
     # atomic_write_json seam (async; capture path + payload).
