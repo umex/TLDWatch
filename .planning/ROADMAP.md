@@ -94,13 +94,21 @@ Plans:
   4. The STT adapter is invoked only through a `STTAdapter` Protocol — the orchestrator code cannot import faster-whisper or whisper.cpp directly.
   5. The CLI runs to completion on both the laptop (CUDA) and the desktop (ROCm or CPU fallback) without code changes.
 
-**Plans**: TBD
+**Plans**: 3 plans (1 wave-1 + 1 wave-2 + 1 wave-3 with SC-5 human-verify checkpoint)
 
 Plans:
 
-- [ ] 03-01: STT adapter (faster-whisper int8) + version pin + int8 verification
-- [ ] 03-02: Audio chunker (window + overlap, OOM halve-and-retry)
-- [ ] 03-03: Standalone CLI (file in, transcript.json out, language detect)
+**Wave 1**
+
+- [ ] 03-01-PLAN.md — STTAdapter Protocol + FasterWhisperAdapter (lazy import, D-08 int8 verification) + faster-whisper/ctranslate2 pins + Wave 0 test stubs (autonomous; TRANS-01, INGEST-06)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 03-02-PLAN.md — Audio chunker (decode once, ≤30min single call, >30min windowed + overlap + OOM halve-and-retry + midpoint stitch) (autonomous; INGEST-05)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 03-03-PLAN.md — Standalone `transcribe` CLI + settings bootstrap + SC-5 device resolution + atomic write + SC-5 human-verify checkpoint (non-autonomous; TRANS-01, INGEST-06)
 
 ### Phase 4: Job Orchestrator + Persistent Queue + WebSocket Progress
 
