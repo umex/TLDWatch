@@ -33,9 +33,12 @@ strict superset — existing implementations remain valid.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from app.models.transcript import TranscriptSegment  # noqa: F401  (re-exported below)
+
+if TYPE_CHECKING:
+    import numpy.ndarray  # type: ignore[import-not-found]
 
 
 @dataclass
@@ -106,6 +109,16 @@ class STTAdapter(Protocol):
         condition_on_previous_text: bool = True,
     ) -> SttTranscription: ...
     def detect_language(self, audio: "object") -> tuple[str, float]: ...
+    def decode_audio(self, path: str) -> "numpy.ndarray":
+        """Decode ``path`` into a mono float32 16 kHz numpy array (D-01 PyAV).
+
+        Added in plan 03-02 so the chunker can decode audio without
+        importing ``faster_whisper`` (SC-4). The concrete implementation
+        lives in :class:`~app.models.stt.adapter.FasterWhisperAdapter`
+        (the ONLY ``faster_whisper`` import site); the
+        :class:`~tests._stt_fake.FakeAdapter` provides a test double.
+        """
+        ...
     def unload(self) -> None: ...
 
 

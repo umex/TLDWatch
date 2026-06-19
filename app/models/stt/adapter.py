@@ -193,6 +193,19 @@ class FasterWhisperAdapter:
         lang, probability, _all = self._model.detect_language(audio, vad_filter=True)
         return (lang, probability)
 
+    def decode_audio(self, path: str) -> Any:
+        """Decode ``path`` into a mono float32 16 kHz numpy array (D-01, 03-02).
+
+        Lazy ``from faster_whisper.audio import decode_audio`` inside the
+        method body -- the SC-4 grep boundary still matches ONLY this
+        module (the grep finds the ``from faster_whisper`` line below,
+        not in the chunker). The chunker routes decoding through this
+        Protocol method so it imports no ``faster_whisper`` (SC-4).
+        """
+        from faster_whisper.audio import decode_audio as _fw_decode_audio  # type: ignore[import-not-found]
+
+        return _fw_decode_audio(path)
+
     def unload(self) -> None:
         """Release the loaded model (idempotent, mirrors ``ModelManager.unload`` D-03).
 

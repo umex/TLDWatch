@@ -14,8 +14,29 @@ halving without pulling in a real GPU model:
   longer than this threshold (seconds) OOMs — so a window ABOVE the
   threshold OOMs and recursive halving succeeds on pieces below it.
 
-``call_count`` and ``transcribe_calls`` are exposed for chunker tests that
-assert the chunker split a long audio window into sub-threshold pieces.
+Two segment-emission modes are supported:
+
+- ``segments`` (the original 03-01 mode): a fixed list of
+  :class:`SimpleNamespace` (``start`` / ``end`` / ``text`` /
+  ``avg_logprob``) returned unchanged on every call (used by 03-01's
+  adapter tests).
+- ``segments_per_chunk`` (added in 03-02 for the chunker tests): when
+  set, ``transcribe()`` emits N evenly-spaced :class:`SttSegment` spanning
+  the actual audio slice length (so the stitch test can assert offsets and
+  the full-coverage test can assert end_s spans the input duration --
+  mirrors real Whisper's small ~5-30 s segments).
+
+``call_count``, ``transcribe_calls`` and ``transcribe_kwargs`` are exposed
+for chunker tests that assert the chunker split a long audio window into
+sub-threshold pieces and passed the right per-chunk kwargs (language,
+condition_on_previous_text). ``detect_language_call_count`` is exposed for
+the first-30 s language-detect test (D-07). ``transcribe_side_effect`` and
+``decode_audio_result`` are test knobs for the non-OOM re-raise test and
+for injecting a pre-decoded audio array without hitting PyAV.
+
+03-02 additions: ``decode_audio`` (Protocol method), ``segments_per_chunk``
+mode, ``transcribe_kwargs`` recording, ``detect_language_call_count``,
+``transcribe_side_effect``, ``decode_audio_result``.
 """
 
 from __future__ import annotations
@@ -43,6 +64,7 @@ class FakeAdapter:
         duration: float = 30.0,
         oom_on_call: int | None = None,
         oom_above_seconds: float | None = None,
+        segments_per_chunk: int | None = None,
     ) -> None:
         # Lazy import to avoid a circular reference at module import time
         # (protocol.py is in the import boundary but tests/_stt_fake.py
@@ -61,9 +83,24 @@ class FakeAdapter:
         self._duration = duration
         self._oom_on_call = oom_on_call
         self._oom_above_seconds = oom_above_seconds
+        self._segments_per_chunk = segments_per_chunk
         self.call_count = 0
         self.transcribe_calls: list = []
+        # 03-02: record per-call kwargs so the chunker tests can assert
+        # the chunker passed the right language / condition_on_previous_text
+        # to every chunk (D-07, Pitfall 8 planner decision).
+        self.transcribe_kwargs: list[dict] = []
+        self.detect_language_call_count = 0
         self.loaded = False
+        # 03-02 test knobs (mutated by tests via attribute assignment).
+        # ``transcribe_side_effect``: if set, ``transcribe`` raises this
+        # instead of its normal behavior (used by the non-OOM re-raise
+        # test -- a RuntimeError without the "out of memory" substring).
+        self.transcribe_side_effect: BaseException | None = None
+        # ``decode_audio_result``: if set, ``decode_audio`` returns this
+        # instead of synthesizing a zeros array (lets the chunker tests
+        # inject a pre-built long-audio array without hitting PyAV).
+        self.decode_audio_result: object | None = None
 
     def load(self) -> None:
         self.loaded = True
@@ -79,6 +116,17 @@ class FakeAdapter:
 
         self.call_count += 1
         self.transcribe_calls.append(audio)
+        self.transcribe_kwargs.append(
+            {
+                "language": language,
+                "vad_filter": vad_filter,
+                "condition_on_previous_text": condition_on_previous_text,
+            }
+        )
+        # Non-OOM side-effect knob (test_oom_non_oom_runtime_error_reraises).
+        # Recorded BEFORE the raise so call_count reflects the attempt.
+        if self.transcribe_side_effect is not None:
+            raise self.transcribe_side_effect
         # OOM-on-call mode: raise on the Nth transcribe.
         if self._oom_on_call is not None and self.call_count == self._oom_on_call:
             raise RuntimeError("CUDA failed with error out of memory")
@@ -90,6 +138,35 @@ class FakeAdapter:
             seconds = len(audio) / SAMPLE_RATE
             if seconds > self._oom_above_seconds:
                 raise RuntimeError("CUDA failed with error out of memory")
+
+        # segments_per_chunk mode (03-02): emit N evenly-spaced segments
+        # spanning the actual audio slice length. Mirrors real Whisper's
+        # small segments so the chunker's overlap-dedupe drops only the
+        # segments fully inside the overlap region (no over-drop).
+        if self._segments_per_chunk is not None and isinstance(audio, np.ndarray):
+            chunk_seconds = len(audio) / SAMPLE_RATE
+            if chunk_seconds <= 0 or self._segments_per_chunk <= 0:
+                segments = []
+            else:
+                step = chunk_seconds / self._segments_per_chunk
+                segments = [
+                    self._SttSegment(
+                        start_s=i * step,
+                        end_s=(i + 1) * step,
+                        text=f"seg {i}",
+                        confidence=0.9,
+                    )
+                    for i in range(self._segments_per_chunk)
+                ]
+            return self._SttTranscription(
+                segments=segments,
+                language=self._language,
+                language_probability=self._language_probability,
+                duration=chunk_seconds,
+            )
+
+        # Original 03-01 mode: fixed configured segments (Segment ->
+        # SttSegment mapping with confidence = exp(avg_logprob)).
         segments = [
             self._SttSegment(
                 start_s=seg.start,
@@ -107,7 +184,19 @@ class FakeAdapter:
         )
 
     def detect_language(self, audio):
+        self.detect_language_call_count += 1
         return (self._language, self._language_probability)
+
+    def decode_audio(self, path: str):
+        """03-02 Protocol addition: return a pre-set array or a zeros stub.
+
+        If ``decode_audio_result`` is set, return it (lets chunker tests
+        inject a pre-built long-audio array without hitting PyAV).
+        Otherwise return a 30 s silence zeros array (the default stub).
+        """
+        if self.decode_audio_result is not None:
+            return self.decode_audio_result
+        return np.zeros(SAMPLE_RATE * 30, dtype="float32")
 
     def unload(self) -> None:
         self.loaded = False
