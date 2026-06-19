@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: context exhaustion at 75% (2026-06-19)
-last_updated: "2026-06-19T06:25:33.455Z"
-last_activity: 2026-06-19 -- Phase 02 execution started
+last_updated: "2026-06-19T07:05:00.000Z"
+last_activity: 2026-06-19 -- Phase 02 gap-closure wave 3: 02-04 (SC-3 download) complete
 progress:
   total_phases: 10
   completed_phases: 1
   total_plans: 9
-  completed_plans: 7
-  percent: 10
+  completed_plans: 8
+  percent: 11
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 ## Current Position
 
 Phase: 02 (gpu-backend-detection-model-manager) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 02
-Last activity: 2026-06-19 -- Phase 02 execution started
+Plan: 4 of 5 (02-04 SC-3 download fix complete; 02-05 SC-4 vram indicator next)
+Status: Executing Phase 02 — gap-closure wave 3
+Last activity: 2026-06-19 -- 02-04 complete (thread-offloaded hf_hub_download + classic non-Xet resume; 185 tests green)
 
-Progress: [██████░░░░░░] 14%
+Progress: [██████░░░░░░] 16%
 
 ## Performance Metrics
 
@@ -45,11 +45,11 @@ Progress: [██████░░░░░░] 14%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 4 | 4 | — |
-| 02 | 3 | - | - |
+| 02 | 4 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-02, 01-03, 01-04, 02-01, 02-02 (151 tests green after 02-02)
+- Last 5 plans: 01-03, 01-04, 02-01, 02-02, 02-04 (185 tests green after 02-04)
 - Trend: stable
 
 *Updated after each plan completion*
@@ -66,6 +66,7 @@ Recent decisions affecting current work:
 - **Plan 01-04 (gap-closure):** `PATCH /settings` is restart-only via a `pending` slot in the on-disk JSON; the in-memory state is not swapped until the next boot (`apply_pending()` in the lifespan). `stage_to_status(stage, manifest)` is the single source of truth for the stage-to-status mapping; `update_stage` writes status + full metadata in a single UPDATE; `reconcile_all` projects the same columns on boot. `create_job` compensates the DB row on folder/manifest failure. `parse_stage_file` validates stage files against typed Pydantic models. `mark_stale` is a no-op on terminal rows. Migration runner records the version on the all-duplicate-column path.
 - **Plan 02-01 (GPU detect + settings wire-in):** `Settings` extended with 7 Phase 2 fields (D-08 declare-now); `backend: GpuBackend` is REQUIRED (no default) so a Phase 1 settings file triggers the first-boot detect path in the lifespan (`try/except` around `load_settings_from_disk` -> `await backend_module.detect()` + `burn_test()` -> atomic write). `hf_token` base64 on disk via `field_serializer` + `field_validator(mode="before")` (D-05); never returned in `GET /settings` (route nulls the body). `UpdateSettingsRequest` is all-optional with `extra="forbid"` (D-08 — backend/backend_probe NOT declared); a `model_validator` rejects empty PATCH and explicit-null data_dir; per-field `strict=False` on enum/nested-model fields so JSON coerces. `apply_update` rewritten to write the FULL `new.model_dump()` to disk (was only updating data_dir) so Phase 2 hot-swap fields persist. `probe_vram` implements the two-pool fix (Pitfall 2). `validate_token` four-state shim (D-05, Pitfall 3); `_head` extracted as module-level async seam for tests. `POST /diagnostics/gpu-burn` hot-swaps backend + backend_probe atomically (no X-Restart-Required; H1). 134 tests green (113 existing + 21 new).
 - **Plan 02-02 (model manager + model API):** `ModelManager` owns the lifecycle: `ensure_downloaded` lazy-imports `huggingface_hub.hf_hub_download` (boundary check — only `manager.py` + `hf_token.py` import `huggingface_hub`), size fast-path, SHA verify with bounded 1-retry (Pitfall 4), `GatedRepoError` -> `ModelGatedError` (Pitfall 3). `load` re-reads settings via a factory (H1 hot-swap), enforces D-04 (`concurrent_models=False` -> `ConcurrentModelRefused` 409), probes VRAM via `probe_vram` (Pitfall 2 two-pool fix), enforces the 85% budget gate (SC-4 -> `VramBudgetExceeded` 507), records the reservation in `ManagerState.live_vram_bytes` + `loaded_meta`, emits a structured JSON INFO log line (SC-2). `unload` idempotent (D-03, no timer); `unload_all` on lifespan teardown. 5 typed errors map to 507/409/403/500 in `routes_models`. `REGISTRY` (9 entries: 3 categories x 3 presets) + `PRESETS` (`active_model_set` resolver: override > preset, HW-06) + `app.storage.models_dir` (`repo_id` sandboxes `/` -> `--` per Pitfall 4). Six `/models` routes (GET, POST download 202, GET status, GET SSE, POST load, POST unload 204). `ManagerState.loaded_meta` typed as `dict[ModelCategory, Any]` to avoid a circular import with `app.models.manager`. HW-02 lifecycle delivered (actual GPU inference is Phase 3/7/8). 151 tests green (134 existing + 17 new). HW-04, HW-07, HW-09 marked complete; HW-02 pending actual inference in Phase 3/7/8.
+- **Plan 02-04 (gap-closure, SC-3 download):** `ensure_downloaded` now awaits `asyncio.to_thread(hf_hub_download, ...)` for the primary download AND the bounded retry — unfreezing the FastAPI event loop so WR-01 (409 duplicate-in-flight), WR-02 (live SSE `event:progress` + `:ping` heartbeat + byte-level progress WHILE downloading), and HW-09 (resume-after-crash) hold live. The classic non-Xet HF download path is forced via `hf_xet=False` (version-gated through `inspect.signature`, huggingface_hub>=0.26) with an `HF_HUB_DISABLE_XET=1` env-var fallback for older versions, so the `.incomplete` + HTTP Range resume the `_poll_bytes` scanner assumes actually applies. New `slow_mock_hf_hub_download` conftest fixture (thread-blocking incremental-write side_effect on a `threading.Event`) makes async concurrency observable — the synchronous `mock_hf_hub_download` could never catch the freeze. 5 live-behavior tests in `tests/test_download_routes.py`. 185 tests green. The 409 dedupe logic in `download_model` was correct but unreachable while the loop was frozen; the thread offload alone makes it fire.
 
 ### Pending Todos
 
