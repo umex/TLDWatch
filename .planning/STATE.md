@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-11)
 
 Phase: 03 (stt-adapter-audio-chunker-standalone-cli) — EXECUTING
 Plan: 3 of 3
-Status: Phase complete — ready for verification
+Status: Awaiting human verification (laptop CUDA SC-5) — see 03-UAT.md
 Last activity: 2026-06-19 -- Phase 03 execution started
 
 Progress: [███░░░░░░░] 30%

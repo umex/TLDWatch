@@ -9,7 +9,7 @@ A local-first web app that turns any video (local file, YouTube URL, or YouTube 
 - [x] **Phase 1: Back-end Skeleton + Storage + Data Layout** - FastAPI service, SQLite WAL, per-job filesystem layout, Pydantic schema, OpenAPI surface; the foundation every other component imports. (completed 2026-06-14)
 - [x] **Phase 2: GPU Backend Detection + Model Manager** - First-run CUDA/ROCm/CPU detection, model download with SHA verification, lazy load + idle unload, single-model VRAM discipline. (all plans complete; verification pending) (completed 2026-06-19)
 
-- [x] **Phase 3: STT Adapter + Audio Chunker + Standalone CLI** - faster-whisper adapter, long-audio chunker with OOM fallback, language auto-detect, a runnable CLI that proves the GPU abstraction end-to-end. (completed 2026-06-19)
+- [x] **Phase 3: STT Adapter + Audio Chunker + Standalone CLI** - faster-whisper adapter, long-audio chunker with OOM fallback, language auto-detect, a runnable CLI that proves the GPU abstraction end-to-end. (all plans complete; verification pending — laptop CUDA SC-5 UAT) (completed 2026-06-19)
 - [ ] **Phase 4: Job Orchestrator + Persistent Queue + WebSocket Progress** - In-process job runner, SQLite-backed queue with restart persistence, state machine with file-as-truth, real-time progress broadcast.
 - [ ] **Phase 5: Local File Ingest + History UI + 3-Pane Layout** - Streaming drag-and-drop upload, history list (left pane), transcript view (middle), summary view (right), active-line highlight, no embedded video.
 - [ ] **Phase 6: YouTube Ingest + Sequential Playlist Queue** - yt-dlp audio download, single-URL submit, playlist fan-out with pause/resume, timestamp link-out to YouTube.
