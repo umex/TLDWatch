@@ -56,7 +56,7 @@ from app.models.registry import REGISTRY
 from app.models.settings import Settings
 from app.models.vram import ManagerState, set_manager_state, probe_vram
 from app.settings.service import current
-from app.storage.models_dir import spec_file_path
+from app.storage.models_dir import spec_dir, spec_file_path
 from app.util.time import utcnow_iso
 
 _log = logging.getLogger(__name__)
@@ -275,7 +275,28 @@ class ModelManager:
         Corrupt fast-path: if the target exists, the SHA is set, and the
         SHA does not match, delete the file and re-download once
         (bounded retry -- Pitfall 4, no infinite loop).
+
+        ``spec.file is None`` branch (snapshot / multi-file CTranslate2
+        repos -- the STT + diarize cases): the repo has NO single
+        default file (``Systran/faster-whisper-large-v3`` ships
+        ``model.bin`` + sharded ``model-0000N-of-00003.bin`` + config +
+        tokenizer + vocabulary, all required to load). The old code
+        fabricated ``<sanitized_repo_id>.bin`` and 404'd (03-03 SC-5
+        checkpoint). We instead download the WHOLE repo into the spec
+        directory via ``huggingface_hub.snapshot_download`` and return
+        the directory Path (``WhisperModel(<dir>)`` loads weights +
+        config + tokenizer from it). Fast-path: if the spec dir already
+        holds a populated snapshot (``config.json`` present), return it
+        without hitting the network (``snapshot_download`` is itself
+        idempotent, but the fast-path avoids a network round-trip for
+        the offline / cached case). The single-file (``spec.file`` set)
+        path below is unchanged -- GGUF LLM repos still go through
+        ``hf_hub_download`` with the byte-progress scanner + resume
+        assumptions intact.
         """
+        if spec.file is None:
+            return await self._ensure_snapshot_downloaded(spec, category)
+
         target = spec_file_path(self._settings, category, spec)
         target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -406,6 +427,86 @@ class ModelManager:
                 os.environ["HF_HUB_DISABLE_XET"] = _prev_xet
 
         return target
+
+    async def _ensure_snapshot_downloaded(
+        self, spec: ModelSpec, category: ModelCategory
+    ) -> Path:
+        """Download a whole multi-file repo into the spec dir (``spec.file is None``).
+
+        Used for CTranslate2 snapshot repos (faster-whisper STT +
+        pyannote diarize) that have NO single default file -- the old
+        ``<sanitized_repo_id>.bin`` fallback 404'd because the fabricated
+        file does not exist (03-03 SC-5 checkpoint). ``snapshot_download``
+        fetches every file in the repo into ``local_dir`` and returns
+        the directory; we return the spec dir Path so the adapter loads
+        weights + config + tokenizer from the directory.
+
+        Fast-path: if the spec dir already holds a populated snapshot
+        (``config.json`` present), return it without hitting the network
+        (``snapshot_download`` is itself idempotent, but the fast-path
+        avoids a network round-trip for the offline / cached case).
+
+        The classic non-Xet forcing (``hf_xet=False`` +
+        ``HF_HUB_DISABLE_XET=1``) mirrors the single-file path for resume
+        consistency.
+        """
+        spec_directory = spec_dir(self._settings, category, spec.repo_id)
+        spec_directory.mkdir(parents=True, exist_ok=True)
+
+        # Fast-path: already a populated snapshot (offline / cached).
+        if (spec_directory / "config.json").exists():
+            return spec_directory
+
+        from huggingface_hub import snapshot_download  # type: ignore[import-not-found]
+        from huggingface_hub.errors import (  # type: ignore[import-not-found]
+            GatedRepoError,
+            RepositoryNotFoundError,
+        )
+
+        token = _get_token()
+        revision = spec.revision or "main"
+
+        # Detect whether the installed huggingface_hub supports the
+        # ``hf_xet`` kwarg (added in 0.26+); mirror the single-file path.
+        import inspect
+
+        try:
+            _supports_hf_xet = "hf_xet" in inspect.signature(
+                snapshot_download
+            ).parameters
+        except (TypeError, ValueError):
+            _supports_hf_xet = False
+
+        def _snap_kwargs() -> dict:
+            kw = {
+                "repo_id": spec.repo_id,
+                "revision": revision,
+                "local_dir": str(spec_directory),
+                "token": token,
+            }
+            if _supports_hf_xet:
+                kw["hf_xet"] = False
+            return kw
+
+        # Force the classic non-Xet download path (mirror single-file).
+        _prev_xet = os.environ.get("HF_HUB_DISABLE_XET")
+        os.environ["HF_HUB_DISABLE_XET"] = "1"
+        try:
+            try:
+                await asyncio.to_thread(snapshot_download, **_snap_kwargs())
+            except GatedRepoError as exc:
+                raise ModelGatedError(spec.repo_id) from exc
+            except RepositoryNotFoundError as exc:
+                raise ModelManagerError(
+                    f"repository not found: {spec.repo_id}"
+                ) from exc
+        finally:
+            if _prev_xet is None:
+                os.environ.pop("HF_HUB_DISABLE_XET", None)
+            else:
+                os.environ["HF_HUB_DISABLE_XET"] = _prev_xet
+
+        return spec_directory
 
     async def load(
         self, category: ModelCategory, spec: ModelSpec

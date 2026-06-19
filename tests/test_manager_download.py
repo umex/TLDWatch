@@ -153,3 +153,105 @@ async def test_ensure_downloaded_corrupt_sha_raises_integrity_error(
 
     with pytest.raises(ModelIntegrityError):
         await mgr.ensure_downloaded(spec, ModelCategory.LLM)
+
+
+# --- file=None snapshot-repo path (03-03 SC-5 checkpoint) --------------------
+#
+# ``balanced.stt`` / ``balanced.diarize`` have ``file=None`` (multi-file
+# CTranslate2 / pyannote snapshot repos). The OLD code fabricated
+# ``<sanitized_repo_id>.bin`` and 404'd; the NEW code calls
+# ``snapshot_download`` and returns the repo DIRECTORY. These tests mock
+# the ``huggingface_hub.snapshot_download`` boundary (no real network).
+
+
+@pytest.mark.asyncio
+async def test_file_none_uses_snapshot_download_and_returns_dir(
+    tmp_path: Path, mock_hf_snapshot_download
+) -> None:
+    """file=None: ensure_downloaded calls snapshot_download + returns the spec dir.
+
+    Regression guard for the 03-03 SC-5 checkpoint: the OLD code called
+    ``hf_hub_download`` with the fabricated ``Systran--faster-whisper-large-v3.bin``
+    filename (which 404'd on a real HF repo) and returned a file path;
+    the NEW code calls ``snapshot_download`` with ``local_dir`` = the
+    spec dir and returns the directory Path. This test FAILS on the old
+    code (which never calls ``snapshot_download`` and returns a .bin
+    file path) and PASSES on the new code.
+    """
+    from app.storage.models_dir import spec_dir as spec_dir_fn
+
+    settings = _settings(tmp_path)
+    mgr = ModelManager(settings, settings_factory=lambda: settings)
+    spec = REGISTRY["balanced.stt"]
+    expected_dir = spec_dir_fn(settings, ModelCategory.STT, spec.repo_id)
+
+    path = await mgr.ensure_downloaded(spec, ModelCategory.STT)
+
+    # Returned the repo directory (NOT a fabricated .bin file).
+    assert path == expected_dir
+    assert path.is_dir()
+    # snapshot_download was called with repo_id + local_dir = the spec dir.
+    assert mock_hf_snapshot_download.call_count >= 1
+    call = mock_hf_snapshot_download.call_args
+    assert call.kwargs["repo_id"] == spec.repo_id
+    assert call.kwargs["local_dir"] == str(expected_dir)
+    # The mock populated the directory with config.json (the fast-path
+    # sentinel), exercising the return-dir logic.
+    assert (path / "config.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_file_set_still_uses_hf_hub_download(
+    tmp_path: Path, mock_hf_hub_download, mock_hf_snapshot_download
+) -> None:
+    """file set: ensure_downloaded STILL calls hf_hub_download (single-file path unchanged).
+
+    Proves the single-file (GGUF LLM) path is byte-for-byte unchanged --
+    ``snapshot_download`` is NOT invoked, ``hf_hub_download`` is, and the
+    returned path is the single-file target (not a directory).
+    """
+    settings = _settings(tmp_path)
+    mgr = ModelManager(settings, settings_factory=lambda: settings)
+    spec = REGISTRY["balanced.llm"]
+    target = spec_file_path(settings, ModelCategory.LLM, spec)
+
+    path = await mgr.ensure_downloaded(spec, ModelCategory.LLM)
+
+    assert path == target
+    assert target.exists()
+    assert target.stat().st_size == spec.expected_size_bytes
+    # Single-file path: hf_hub_download called, snapshot_download NOT.
+    assert mock_hf_hub_download.call_count >= 1
+    mock_hf_snapshot_download.assert_not_called()
+    # The single-file filename is the spec's file (NOT the fabricated
+    # sanitized-repo .bin fallback).
+    call = mock_hf_hub_download.call_args
+    assert call.kwargs["filename"] == spec.file
+
+
+@pytest.mark.asyncio
+async def test_file_none_fast_path_returns_without_network(
+    tmp_path: Path, mock_hf_snapshot_download
+) -> None:
+    """file=None fast-path: a pre-populated spec dir returns without snapshot_download.
+
+    If the spec dir already holds a populated snapshot (``config.json``
+    present), ``ensure_downloaded`` returns it WITHOUT hitting the
+    network (``snapshot_download`` is not called) -- the offline / cached
+    fast-path.
+    """
+    from app.storage.models_dir import spec_dir as spec_dir_fn
+
+    settings = _settings(tmp_path)
+    mgr = ModelManager(settings, settings_factory=lambda: settings)
+    spec = REGISTRY["balanced.diarize"]
+    spec_directory = spec_dir_fn(settings, ModelCategory.DIARIZE, spec.repo_id)
+    spec_directory.mkdir(parents=True, exist_ok=True)
+    # Pre-populate the snapshot sentinel.
+    (spec_directory / "config.json").write_text("{}", encoding="utf-8")
+
+    path = await mgr.ensure_downloaded(spec, ModelCategory.DIARIZE)
+
+    assert path == spec_directory
+    # Fast-path: snapshot_download was NOT called (no network round-trip).
+    mock_hf_snapshot_download.assert_not_called()

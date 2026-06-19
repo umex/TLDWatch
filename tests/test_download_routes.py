@@ -88,8 +88,15 @@ def test_hf_hub_download_is_offloaded_to_thread() -> None:
 async def test_download_duplicate_in_flight_returns_409(
     client: httpx.AsyncClient, slow_mock_hf_hub_download
 ) -> None:
-    """WR-01: a second POST while the first download is in-flight -> 409."""
-    model_id = "small.stt"
+    """WR-01: a second POST while the first download is in-flight -> 409.
+
+    Uses ``small.llm`` (``file`` set -- single-file path) because the
+    ``slow_mock_hf_hub_download`` fixture patches ``hf_hub_download``,
+    which is the single-file codepath. The ``file=None`` snapshot-repo
+    path goes through ``snapshot_download`` (03-03 SC-5 checkpoint) and
+    its own progress mechanism, not the ``hf_hub_download`` slow mock.
+    """
+    model_id = "small.llm"
     try:
         first = await client.post(f"/models/{model_id}/download")
         assert first.status_code == 202, first.text
@@ -115,8 +122,13 @@ async def test_download_progress_sse_streams_live(
 ) -> None:
     """WR-02: live SSE emits ``event: progress`` AND ``: ping`` WHILE
     the download is still running (not only after it completes).
+
+    Uses ``small.llm`` (``file`` set -- single-file path) because the
+    ``slow_mock_hf_hub_download`` fixture patches ``hf_hub_download``;
+    the ``file=None`` snapshot-repo path uses ``snapshot_download``
+    (03-03 SC-5 checkpoint), a separate codepath.
     """
-    model_id = "small.stt"
+    model_id = "small.llm"
     # Schedule the release after ~6s so the 5s heartbeat fires WHILE
     # the download is still in-flight.
     timer = threading.Timer(6.0, slow_mock_hf_hub_download.release_event.set)
@@ -171,8 +183,16 @@ async def test_download_progress_byte_level(
 ) -> None:
     """WR-02: byte-level progress -- ``bytes_done`` strictly increases
     across >= 2 ``event: progress`` frames while state == "running".
+
+    Uses ``small.llm`` (``file`` set -- single-file path): the
+    ``_poll_bytes`` scanner in ``routes_models.py`` globs for
+    ``<spec_file_path(...)>.incomplete``, which is the single-file
+    codepath's resume artifact. The ``file=None`` snapshot-repo path
+    (03-03 SC-5 checkpoint) goes through ``snapshot_download`` and does
+    NOT produce this artifact, so byte-level progress via the scanner is
+    a single-file-path contract by construction.
     """
-    model_id = "small.stt"
+    model_id = "small.llm"
     timer = threading.Timer(6.0, slow_mock_hf_hub_download.release_event.set)
     timer.start()
     start = await client.post(f"/models/{model_id}/download")

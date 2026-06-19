@@ -266,6 +266,38 @@ def mock_hf_hub_download(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 
 @pytest.fixture
+def mock_hf_snapshot_download(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Patch the manager's lazy ``snapshot_download`` seam with a MagicMock.
+
+    Mirrors ``mock_hf_hub_download`` but for the ``spec.file is None``
+    snapshot-repo path. The default side_effect creates the
+    ``local_dir`` directory + a fake ``config.json`` (so the populated-
+    snapshot fast-path / return-dir logic is exercised) and returns the
+    directory path. Tests override ``side_effect`` / ``return_value``
+    per-case.
+
+    Returns the ``MagicMock`` installed on
+    ``huggingface_hub.snapshot_download``.
+    """
+    import huggingface_hub  # type: ignore[import-not-found]
+
+    def _default_snapshot(*, repo_id, revision, local_dir, token, **_kwargs):
+        from pathlib import Path
+
+        out_dir = Path(local_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # Fake a populated multi-file snapshot (config.json is the
+        # fast-path sentinel the manager checks).
+        (out_dir / "config.json").write_text("{}", encoding="utf-8")
+        (out_dir / "model.bin").write_bytes(b"x" * 16)
+        return str(out_dir)
+
+    mock = MagicMock(side_effect=_default_snapshot)
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", mock)
+    return mock
+
+
+@pytest.fixture
 def slow_mock_hf_hub_download(
     monkeypatch: pytest.MonkeyPatch,
 ) -> SimpleNamespace:
