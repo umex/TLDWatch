@@ -200,3 +200,40 @@ async def test_get_vram_loaded_when_psutil_absent(
     assert body["used_mb"] == 0
     assert len(body["loaded"]) == 1
     assert body["loaded"][0]["category"] == "stt"
+
+
+@pytest.mark.asyncio
+async def test_get_vram_reflects_loaded_model_on_cpu(
+    client: httpx.AsyncClient,
+    cpu_manager: object,
+) -> None:
+    """SC-4 happy path: with psutil installed, POST /models/{id}/load ->
+    200 then GET /diagnostics/vram reflects the loaded model on CPU with
+    real system RAM (total_mb > 0 via psutil.virtual_memory).
+    """
+    resp = await client.post("/models/small.stt/load")
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.get("/diagnostics/vram")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["backend"] == "cpu"
+    assert body["total_mb"] > 0
+    assert len(body["loaded"]) == 1
+    assert body["loaded"][0]["category"] == "stt"
+    assert "small" in body["loaded"][0]["model_id"]
+
+
+@pytest.mark.asyncio
+async def test_get_vram_empty_when_nothing_loaded(
+    client: httpx.AsyncClient,
+    cpu_manager: object,
+) -> None:
+    """Regression guard: with a live but empty manager state, GET
+    /diagnostics/vram returns ``loaded==[]`` (now via
+    ``_loaded_list(empty)`` instead of a literal ``[]``).
+    """
+    resp = await client.get("/diagnostics/vram")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["loaded"] == []
