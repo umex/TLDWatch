@@ -41,9 +41,11 @@ boundary check ``grep -rE "from huggingface_hub" app/`` matches only
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -243,10 +245,31 @@ class ModelManager:
 
         Lazy-import ``huggingface_hub.hf_hub_download`` inside the body
         (boundary check -- only this module + ``hf_token.py`` import
-        ``huggingface_hub``). The library's built-in ``<blob>.incomplete``
-        + Range-header mechanism is the resume path; we pass
-        ``force_download=False`` (the default) so a partial file is
-        resumed, NOT re-fetched from zero.
+        ``huggingface_hub``). The download is OFFLOADED to a worker
+        thread via ``asyncio.to_thread`` so the event loop stays
+        responsive while the (synchronous, potentially long-running)
+        download runs -- this is the SC-3 fix that restores WR-01 (409
+        duplicate-in-flight), WR-02 (live SSE heartbeat + byte-level
+        progress), and concurrent request handling.
+
+        Resume path: we FORCE the classic non-Xet download path so the
+        library's built-in ``<blob>.incomplete`` + HTTP Range-header
+        resume mechanism applies (the one the
+        ``_poll_bytes`` scanner in ``routes_models.py`` globs for). The
+        Xet backend stages partial bytes in a different location that
+        our scanner does not see, and on restart re-fetches from zero
+        -- HW-09 resume-after-crash was broken for Xet downloads. We
+        force the classic path two ways, belt-and-suspenders:
+
+        - Pass ``hf_xet=False`` to ``hf_hub_download`` when the
+          installed ``huggingface_hub`` version supports that kwarg
+          (added in 0.26+; detected via ``inspect.signature``).
+        - Set ``HF_HUB_DISABLE_XET=1`` in ``os.environ`` around the
+          call (restored afterwards) -- effective on versions that
+          read the env var, a harmless no-op on versions that do not.
+
+        We pass ``force_download=False`` (the default) so a partial
+        file is resumed, NOT re-fetched from zero.
 
         Fast-path: if the target exists at the expected size, return it.
         Corrupt fast-path: if the target exists, the SHA is set, and the
@@ -294,55 +317,84 @@ class ModelManager:
         token = _get_token()
         filename = spec.file or "model.bin"
         revision = spec.revision or "main"
-        try:
-            hf_hub_download(
-                repo_id=spec.repo_id,
-                filename=filename,
-                revision=revision,
-                local_dir=str(target.parent),
-                token=token,
-            )
-        except GatedRepoError as exc:
-            raise ModelGatedError(spec.repo_id) from exc
-        except RepositoryNotFoundError as exc:
-            raise ModelManagerError(
-                f"repository not found: {spec.repo_id}"
-            ) from exc
 
-        # Post-download SHA verify (bounded: 1 re-download attempt).
-        if spec.expected_sha256 is not None:
-            if not target.exists():
+        # Detect whether the installed huggingface_hub supports the
+        # ``hf_xet`` kwarg (added in 0.26+). On older versions we fall
+        # back to the ``HF_HUB_DISABLE_XET`` env var alone.
+        import inspect
+
+        try:
+            _supports_hf_xet = "hf_xet" in inspect.signature(
+                hf_hub_download
+            ).parameters
+        except (TypeError, ValueError):
+            _supports_hf_xet = False
+
+        def _download_kwargs() -> dict:
+            kw = {
+                "repo_id": spec.repo_id,
+                "filename": filename,
+                "revision": revision,
+                "local_dir": str(target.parent),
+                "token": token,
+            }
+            if _supports_hf_xet:
+                kw["hf_xet"] = False
+            return kw
+
+        # Force the classic non-Xet download path so the
+        # ``<blob>.incomplete`` + HTTP Range resume mechanism the
+        # ``_poll_bytes`` scanner assumes actually applies (HW-09).
+        _prev_xet = os.environ.get("HF_HUB_DISABLE_XET")
+        os.environ["HF_HUB_DISABLE_XET"] = "1"
+        try:
+            try:
+                await asyncio.to_thread(hf_hub_download, **_download_kwargs())
+            except GatedRepoError as exc:
+                raise ModelGatedError(spec.repo_id) from exc
+            except RepositoryNotFoundError as exc:
                 raise ModelManagerError(
-                    f"download succeeded but target file is missing: {target}"
-                )
-            got = _sha256_of_file(target)
-            if got != spec.expected_sha256:
-                # One bounded retry: delete + re-download + re-verify.
-                _log.warning(
-                    "post-download sha mismatch for %s; retrying once",
-                    spec.repo_id,
-                )
-                try:
-                    target.unlink()
-                except OSError:
-                    pass
-                try:
-                    hf_hub_download(
-                        repo_id=spec.repo_id,
-                        filename=filename,
-                        revision=revision,
-                        local_dir=str(target.parent),
-                        token=token,
-                    )
-                except GatedRepoError as exc:
-                    raise ModelGatedError(spec.repo_id) from exc
-                except RepositoryNotFoundError as exc:
+                    f"repository not found: {spec.repo_id}"
+                ) from exc
+
+            # Post-download SHA verify (bounded: 1 re-download attempt).
+            if spec.expected_sha256 is not None:
+                if not target.exists():
                     raise ModelManagerError(
-                        f"repository not found: {spec.repo_id}"
-                    ) from exc
+                        f"download succeeded but target file is missing: {target}"
+                    )
                 got = _sha256_of_file(target)
                 if got != spec.expected_sha256:
-                    raise ModelIntegrityError(spec.repo_id, spec.expected_sha256, got)
+                    # One bounded retry: delete + re-download + re-verify.
+                    _log.warning(
+                        "post-download sha mismatch for %s; retrying once",
+                        spec.repo_id,
+                    )
+                    try:
+                        target.unlink()
+                    except OSError:
+                        pass
+                    try:
+                        await asyncio.to_thread(
+                            hf_hub_download, **_download_kwargs()
+                        )
+                    except GatedRepoError as exc:
+                        raise ModelGatedError(spec.repo_id) from exc
+                    except RepositoryNotFoundError as exc:
+                        raise ModelManagerError(
+                            f"repository not found: {spec.repo_id}"
+                        ) from exc
+                    got = _sha256_of_file(target)
+                    if got != spec.expected_sha256:
+                        raise ModelIntegrityError(
+                            spec.repo_id, spec.expected_sha256, got
+                        )
+        finally:
+            # Restore the prior env state (unset if it was absent).
+            if _prev_xet is None:
+                os.environ.pop("HF_HUB_DISABLE_XET", None)
+            else:
+                os.environ["HF_HUB_DISABLE_XET"] = _prev_xet
 
         return target
 
