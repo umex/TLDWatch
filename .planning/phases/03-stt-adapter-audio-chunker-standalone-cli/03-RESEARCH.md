@@ -516,19 +516,19 @@ def main() -> int:
 
 **If this table is empty:** N/A — six assumptions flagged. The two load-bearing ones (A1, A6) both reduce to: **the planner must add a `checkpoint:human-verify` task that confirms the laptop's CUDA runtime libs are findable by CT2 before declaring SC-5 done.**
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **CUDA runtime libs on the laptop (BLOCKER for SC-5's CUDA half)**
+1. RESOLVED — 03-03 Task 3 `checkpoint:human-verify` (blocking) runs `ctranslate2.get_supported_compute_types('cuda',0)` on the laptop and gates any `nvidia-*-cu12` pip install before SC-5. **CUDA runtime libs on the laptop (BLOCKER for SC-5's CUDA half)**
    - What we know: CT2 4.7.2 win_amd64 bundles cuDNN 9 but NOT cublas/cudart (dynamic loading). Phase 3 does NOT install torch.
    - What's unclear: does the laptop already have a system CUDA 12.x toolkit on PATH, or do we need `nvidia-cublas-cu12` + `nvidia-cuda-runtime-cu12` pip packages? If pip packages, are their DLLs findable by CT2's dynamic loader on Windows (PATH / copied next to ctranslate2.dll)?
    - Recommendation: planner adds a `checkpoint:human-verify` task BEFORE the SC-5 acceptance test — "on the laptop, run `python -c \"import ctranslate2; print(ctranslate2.get_supported_compute_types('cuda',0))\"` and confirm `int8`/`int8_float16` are present (not just `float32`)". If they are missing, add the `nvidia-*-cu12` pip deps + a PATH-shim in the adapter. This is the single biggest threat to the silent-no-install laptop promise and to SC-5.
 
-2. **Target Python interpreter (3.11 vs 3.12)**
+2. RESOLVED — non-blocking: the pins (faster-whisper==1.2.1 + ctranslate2==4.7.2) are interpreter-agnostic (both ship cp311 + cp312 win_amd64 wheels); pyproject `requires-python>=3.11` stands. **Target Python interpreter (3.11 vs 3.12)**
    - What we know: `pyproject` says `>=3.11`; the only interpreter on this machine is 3.12.5; no `.venv`. CT2 has both cp311 and cp312 win_amd64 wheels.
    - What's unclear: which interpreter the laptop / desktop actually run the CLI with.
    - Recommendation: confirm with the user; pin a `.python-version` or document the venv in Wave 0. Either interpreter works with the recommended pins.
 
-3. **`condition_on_previous_text` for the chunked path (Pitfall 8)**
+3. RESOLVED — 03-02 planner decision: `condition_on_previous_text=False` for chunked calls (each chunk independent after stitching), `True` for the ≤30 min single-call path. **`condition_on_previous_text` for the chunked path (Pitfall 8)**
    - What we know: default `True` can cascade hallucinations on long audio; the chunked path calls `transcribe()` per chunk so conditioning resets naturally if no `initial_prompt` is passed across chunks.
    - What's unclear: whether to set `condition_on_previous_text=False` explicitly for chunked calls, or pass the last chunk's final text as `initial_prompt` for continuity.
    - Recommendation: set `condition_on_previous_text=False` for chunked calls (each chunk is independent after stitching) — simpler + lower VRAM + avoids hallucination cascades. Leave `True` for the ≤30 min single-call path. Planner makes the call.
