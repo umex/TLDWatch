@@ -79,7 +79,7 @@ Plans:
 **Wave 4** *(gap-closure; 02-04 and 02-05 run in parallel; close 02-UAT.md SC-3 + SC-4)*
 
 - [x] 02-04: Fix SC-3 download defect — thread offload hf_hub_download + live SSE + 409 + classic non-Xet resume (autonomous; HW-09)
-- [ ] 02-05: Fix SC-4 vram indicator defect — CPU fallbacks preserve loaded + psutil install + live test (autonomous; HW-07)
+- [x] 02-05: Fix SC-4 vram indicator defect — CPU fallbacks preserve loaded + psutil install + live test (autonomous; HW-07)
 
 ### Phase 3: STT Adapter + Audio Chunker + Standalone CLI
 
@@ -265,7 +265,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Back-end Skeleton + Storage + Data Layout | 3/3 | Complete   | 2026-06-14 |
-| 2. GPU Backend Detection + Model Manager | 4/5 | In Progress|  |
+| 2. GPU Backend Detection + Model Manager | 5/5 | Complete   | 2026-06-19 |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 0/3 | Not started | - |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 0/3 | Not started | - |
 | 5. Local File Ingest + History UI + 3-Pane Layout | 0/3 | Not started | - |
