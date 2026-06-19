@@ -151,7 +151,7 @@ def probe_vram(backend: GpuBackend, manager_state: ManagerState) -> VRAMState:
                 total_mb=0,
                 available_mb=0,
                 used_mb=0,
-                loaded=[],
+                loaded=_loaded_list(manager_state),
             )
         try:
             ps = psutil.virtual_memory()
@@ -169,7 +169,7 @@ def probe_vram(backend: GpuBackend, manager_state: ManagerState) -> VRAMState:
                 total_mb=0,
                 available_mb=0,
                 used_mb=0,
-                loaded=[],
+                loaded=_loaded_list(manager_state),
             )
 
     # CUDA / ROCm (HIP): the torch.cuda API serves both.
