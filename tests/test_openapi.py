@@ -96,3 +96,17 @@ async def test_openapi_post_jobs_201_references_job_response(
     )
     assert "JobResponse" in _json.dumps(s201), s201
     assert "JobManifest" in data.get("components", {}).get("schemas", {})
+
+
+@pytest.mark.asyncio
+async def test_openapi_gpu_backend_enum_has_directml_vulkan(
+    client: httpx.AsyncClient,
+) -> None:
+    """02 refactor: the GpuBackend enum advertises the extension backends."""
+    resp = await client.get("/openapi.json")
+    data = resp.json()
+    schemas = data.get("components", {}).get("schemas", {})
+    assert "GpuBackend" in schemas, list(schemas.keys())
+    values = schemas["GpuBackend"].get("enum", [])
+    assert "directml" in values
+    assert "vulkan" in values

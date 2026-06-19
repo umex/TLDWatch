@@ -43,6 +43,27 @@ class GpuBackend(str, Enum):
     CUDA = "cuda"
     ROCM = "rocm"
     CPU = "cpu"
+    # Extension backends (02 refactor): stub providers with ``available() == False``
+    # so ``detect()`` never selects them yet, but the enum / OpenAPI / settings
+    # surface already advertises the full set. Flip the provider's ``available()``
+    # to enable one (see ``app.models.backend``).
+    DIRECTML = "directml"
+    VULKAN = "vulkan"
+
+
+class InferenceEngine(str, Enum):
+    """The inference package a device argument is being resolved for.
+
+    Package-based (not category-based) because :func:`device_for` returns the
+    literal device argument a *package* accepts (``"cuda"``, ``0``,
+    ``"privateuseone"``, ``"vulkan"``); ``ModelCategory`` already owns the
+    "which manager slot" concern. Phase 3 maps ``ModelCategory`` -> this enum.
+    """
+
+    TORCH = "torch"
+    FASTER_WHISPER = "faster_whisper"
+    LLAMA_CPP = "llama_cpp"
+    PYANNITE = "pyannite"
 
 
 class QualityPreset(str, Enum):
@@ -160,6 +181,7 @@ __all__ = [
     "GpuBackend",
     "GpuBurnResult",
     "HfTokenResult",
+    "InferenceEngine",
     "LoadedModelInfo",
     "ModelCategory",
     "ModelSet",

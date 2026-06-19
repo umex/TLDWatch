@@ -127,3 +127,16 @@ async def test_hf_token_is_base64_on_disk(
     # base64("hf_abc123") == "aGZfYWJjMTIz"
     assert "aGZfYWJjMTIz" in raw, raw
     assert "hf_abc123" not in raw, raw
+
+def test_settings_accepts_directml_vulkan_enum(tmp_data_dir: Path) -> None:
+    """02 refactor: the new stub backends are valid Settings.backend values."""
+    from app.models.diagnostics import GpuBackend
+    from app.models.settings import Settings
+
+    data_dir = tmp_data_dir / "data"
+    for backend in (GpuBackend.DIRECTML, GpuBackend.VULKAN):
+        s = Settings(data_dir=str(data_dir.resolve()), backend=backend)
+        assert s.backend == backend
+        # round-trips through JSON (Pydantic encodes the str-enum value)
+        roundtrip = Settings.model_validate_json(s.model_dump_json())
+        assert roundtrip.backend == backend

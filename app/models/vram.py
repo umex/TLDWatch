@@ -130,6 +130,18 @@ def probe_vram(backend: GpuBackend, manager_state: ManagerState) -> VRAMState:
     Never raises. A lazy-import failure or a torch error returns a
     zeroed state so ``GET /diagnostics/vram`` still responds 200.
     """
+    if backend in (GpuBackend.DIRECTML, GpuBackend.VULKAN):
+        # Stub backends (detect never selects them yet, but a hand-edited
+        # settings.json could): no VRAM probe package is wired, so return a
+        # zeroed state with the loaded list intact (D-06: still respond 200;
+        # Phase 3 wires the real probe — plan Trade-off B).
+        return VRAMState(
+            backend=backend,
+            total_mb=0,
+            available_mb=0,
+            used_mb=0,
+            loaded=_loaded_list(manager_state),
+        )
     if backend == GpuBackend.CPU:
         try:
             import psutil  # type: ignore[import-not-found]
