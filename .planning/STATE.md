@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
+status: executing
 stopped_at: context exhaustion at 76% (2026-06-19)
-last_updated: "2026-06-19T09:49:58.224Z"
-last_activity: 2026-06-19 -- Phase 03 planning complete
+last_updated: "2026-06-19T10:11:44.491Z"
+last_activity: 2026-06-19 -- Phase 03 execution started
 progress:
   total_phases: 10
   completed_phases: 2
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
   percent: 20
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** The user can drop in any video and get back a clean, speaker-aware transcript plus summaries shaped for the content type — without it ever leaving the machine.
-**Current focus:** Phase 02 — gpu-backend-detection-model-manager
+**Current focus:** Phase 03 — stt-adapter-audio-chunker-standalone-cli
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
-Status: All 5 plans done — running post-wave gates + gsd-verifier
-Last activity: 2026-06-19 -- Phase 03 planning complete
+Phase: 03 (stt-adapter-audio-chunker-standalone-cli) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-06-19 -- Phase 03 execution started
 
 Progress: [██████░░░░░░] 16%
 
@@ -54,6 +54,7 @@ Progress: [██████░░░░░░] 16%
 
 *Updated after each plan completion*
 | Phase 02 P05 | 12 | 2 tasks | 2 files |
+| Phase 03 P01 | 6m | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,9 @@ Recent decisions affecting current work:
 - **Plan 02-02 (model manager + model API):** `ModelManager` owns the lifecycle: `ensure_downloaded` lazy-imports `huggingface_hub.hf_hub_download` (boundary check — only `manager.py` + `hf_token.py` import `huggingface_hub`), size fast-path, SHA verify with bounded 1-retry (Pitfall 4), `GatedRepoError` -> `ModelGatedError` (Pitfall 3). `load` re-reads settings via a factory (H1 hot-swap), enforces D-04 (`concurrent_models=False` -> `ConcurrentModelRefused` 409), probes VRAM via `probe_vram` (Pitfall 2 two-pool fix), enforces the 85% budget gate (SC-4 -> `VramBudgetExceeded` 507), records the reservation in `ManagerState.live_vram_bytes` + `loaded_meta`, emits a structured JSON INFO log line (SC-2). `unload` idempotent (D-03, no timer); `unload_all` on lifespan teardown. 5 typed errors map to 507/409/403/500 in `routes_models`. `REGISTRY` (9 entries: 3 categories x 3 presets) + `PRESETS` (`active_model_set` resolver: override > preset, HW-06) + `app.storage.models_dir` (`repo_id` sandboxes `/` -> `--` per Pitfall 4). Six `/models` routes (GET, POST download 202, GET status, GET SSE, POST load, POST unload 204). `ManagerState.loaded_meta` typed as `dict[ModelCategory, Any]` to avoid a circular import with `app.models.manager`. HW-02 lifecycle delivered (actual GPU inference is Phase 3/7/8). 151 tests green (134 existing + 17 new). HW-04, HW-07, HW-09 marked complete; HW-02 pending actual inference in Phase 3/7/8.
 - **Plan 02-04 (gap-closure, SC-3 download):** `ensure_downloaded` now awaits `asyncio.to_thread(hf_hub_download, ...)` for the primary download AND the bounded retry — unfreezing the FastAPI event loop so WR-01 (409 duplicate-in-flight), WR-02 (live SSE `event:progress` + `:ping` heartbeat + byte-level progress WHILE downloading), and HW-09 (resume-after-crash) hold live. The classic non-Xet HF download path is forced via `hf_xet=False` (version-gated through `inspect.signature`, huggingface_hub>=0.26) with an `HF_HUB_DISABLE_XET=1` env-var fallback for older versions, so the `.incomplete` + HTTP Range resume the `_poll_bytes` scanner assumes actually applies. New `slow_mock_hf_hub_download` conftest fixture (thread-blocking incremental-write side_effect on a `threading.Event`) makes async concurrency observable — the synchronous `mock_hf_hub_download` could never catch the freeze. 5 live-behavior tests in `tests/test_download_routes.py`. 185 tests green. The 409 dedupe logic in `download_model` was correct but unreachable while the loop was frozen; the thread offload alone makes it fire.
 - [Phase 02]: 02-05 SC-4 vram fix: probe_vram CPU error-fallbacks return loaded=_loaded_list(manager_state) (not loaded=[]); psutil stays a lazy in-body import; inline no_psutil+cpu_manager fixtures in test_diagnostics_api.py; pip install -e . once for psutil (declared >=5.9 but missing from runtime env - the live SC-4 trigger); 188 tests green (185 + 3 new).
+- [Phase ?]: 03-01: SttSegment mirrors TranscriptSegment shape but is a separate type (D-06 layering)
+- [Phase ?]: 03-01: [project.scripts] transcribe deferred to 03-03; nvidia-cu12 libs deferred to SC-5 (Codex HIGH)
+- [Phase ?]: 03-01: D-08 _ACCEPTED table accepts CUDA int8->int8_float16, rejects float32 fallback; FasterWhisperAdapter is the ONLY fw/ct2 import site (SC-4)
 
 ### Pending Todos
 
@@ -100,7 +104,7 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-19T09:35:20.899Z
+Last session: 2026-06-19T10:11:44.485Z
 Stopped at: context exhaustion at 76% (2026-06-19)
 Resume file: .planning/phases/03-stt-adapter-audio-chunker-standalone-cli/03-CONTEXT.md
 

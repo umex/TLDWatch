@@ -14,7 +14,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **INGEST-03**: User can submit a YouTube playlist URL
 - [ ] **INGEST-04**: App downloads YouTube audio locally and processes it from scratch (no reliance on YouTube's auto-captions)
 - [ ] **INGEST-05**: App handles long videos by chunking audio automatically, with fallback when a single-shot job would OOM
-- [ ] **INGEST-06**: App auto-detects the spoken language from the audio
+- [x] **INGEST-06**: App auto-detects the spoken language from the audio
 
 ### Job Management
 
@@ -27,7 +27,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Transcription & Diarization
 
-- [ ] **TRANS-01**: App produces a transcript with timestamps for the entire video
+- [x] **TRANS-01**: App produces a transcript with timestamps for the entire video
 - [ ] **TRANS-02**: App produces a speaker-diarized transcript when multiple speakers are detected
 - [ ] **TRANS-03**: Diarized speakers are labelled "Person 1", "Person 2", etc. by default
 - [ ] **TRANS-04**: User can bulk-rename a speaker (e.g. "Person 1" → "Jim") via clickable speaker chips at the top of the transcript, and all instances update
@@ -130,14 +130,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INGEST-03 | Phase 6 | Pending |
 | INGEST-04 | Phase 6 | Pending |
 | INGEST-05 | Phase 3 | Pending |
-| INGEST-06 | Phase 3 | Pending |
+| INGEST-06 | Phase 3 | Complete |
 | JOB-01 | Phase 6 | Pending |
 | JOB-02 | Phase 4 | Pending |
 | JOB-03 | Phase 5 | Pending |
 | JOB-04 | Phase 4 | Pending |
 | JOB-05 | Phase 4 | Pending |
 | JOB-06 | Phase 4 | Pending |
-| TRANS-01 | Phase 3 | Pending |
+| TRANS-01 | Phase 3 | Complete |
 | TRANS-02 | Phase 7 | Pending |
 | TRANS-03 | Phase 7 | Pending |
 | TRANS-04 | Phase 7 | Pending |
