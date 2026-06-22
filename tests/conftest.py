@@ -57,6 +57,12 @@ def tmp_data_dir(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         Settings(
             data_dir=str(data_dir.resolve()),
             backend=GpuBackend.CPU,
+            # Phase 4 (04-02): the lifespan auto-starts the single
+            # in-process worker when run_worker is True. Tests drive the
+            # worker manually (or do not drive it at all -- many tests
+            # only need the app boot), so the fixture opts out of the
+            # auto-start by writing run_worker=False.
+            run_worker=False,
         ).model_dump_json(),
         encoding="utf-8",
     )
@@ -466,7 +472,7 @@ def mock_stt_adapter(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
             # (tests mutate mock_stt_adapter.compute_type BEFORE load()).
             self.model.compute_type = mock.compute_type
 
-        def transcribe(self, audio, language=None, vad_filter=True, condition_on_previous_text=True, **_kwargs):
+        def transcribe(self, audio, language=None, vad_filter=True, condition_on_previous_text=True, *, progress_cb=None, cancel_flag=None, **_kwargs):
             seg = SimpleNamespace(start=1.0, end=3.0, text="hi", avg_logprob=-0.1)
             info = SimpleNamespace(language="en", language_probability=0.99, duration=30.0)
             return iter([seg]), info

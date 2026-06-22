@@ -41,7 +41,12 @@ mode, ``transcribe_kwargs`` recording, ``detect_language_call_count``,
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
+from typing import Callable
+
+from app.jobs.errors import JobCancelled  # Phase 4: fakes import from the neutral module (Fix 5)
+from app.models.stt.protocol import ChunkProgress  # Phase 4: progress callback payload
 
 # Sample rate used by faster-whisper (16 kHz). Importing numpy lazily keeps
 # the module importable on CPU-only environments per the lazy-import
@@ -111,6 +116,9 @@ class FakeAdapter:
         language: str | None = None,
         vad_filter: bool = True,
         condition_on_previous_text: bool = True,
+        *,
+        progress_cb: "Callable[[ChunkProgress], None] | None" = None,
+        cancel_flag: "threading.Event | None" = None,
     ):
         import math
 
@@ -139,6 +147,18 @@ class FakeAdapter:
             if seconds > self._oom_above_seconds:
                 raise RuntimeError("CUDA failed with error out of memory")
 
+        # Phase 4 D-06: cooperative cancel. The FakeAdapter honors the
+        # cancel flag between "chunks" -- here that means before emitting
+        # the result. The chunker's own loop also checks cancel_flag at
+        # the loop top; this in-adapter check lets a single-call fast
+        # path (no chunker loop) observe a pre-call cancel too, mirroring
+        # the chunker's fast-path guard.
+        if cancel_flag is not None and cancel_flag.is_set():
+            # job_id is not threaded through to the adapter; use a stable
+            # sentinel -- the orchestrator's tests observe JobCancelled
+            # via the chunker path, not via this in-adapter raise.
+            raise JobCancelled("fake-adapter")
+
         # segments_per_chunk mode (03-02): emit N evenly-spaced segments
         # spanning the actual audio slice length. Mirrors real Whisper's
         # small segments so the chunker's overlap-dedupe drops only the
@@ -158,6 +178,16 @@ class FakeAdapter:
                     )
                     for i in range(self._segments_per_chunk)
                 ]
+            # Phase 4 D-09: emit one progress event per chunk the fake
+            # "transcribes". The fake does not chunk further itself, so
+            # chunks_done == chunks_total == 1 per call -- the chunker
+            # loop emits the cumulative progress; this per-call emit is
+            # a test knob so a test can assert the adapter saw the
+            # progress_cb (used by the orchestrator's cancel test).
+            if progress_cb is not None:
+                progress_cb(
+                    ChunkProgress(chunks_done=1, chunks_total=1, chunk_start_s=0.0)
+                )
             return self._SttTranscription(
                 segments=segments,
                 language=self._language,
@@ -176,6 +206,10 @@ class FakeAdapter:
             )
             for seg in self._segments_cfg
         ]
+        if progress_cb is not None:
+            progress_cb(
+                ChunkProgress(chunks_done=1, chunks_total=1, chunk_start_s=0.0)
+            )
         return self._SttTranscription(
             segments=segments,
             language=self._language,
