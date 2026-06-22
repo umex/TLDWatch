@@ -10,6 +10,7 @@ from app.models.common import StageTimestamps
 
 JobStatus = Literal[
     "queued",
+    "starting",
     "ingesting",
     "transcribing",
     "diarizing",

@@ -25,13 +25,14 @@ RED on the import (the TDD RED gate).
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
 import pytest
 
 from app.jobs.errors import JobCancelled  # noqa: F401  (Task 1a contract)
-from app.jobs.manifest import empty_manifest, write_manifest
+from app.jobs.manifest import empty_manifest, read_manifest, write_manifest
 from app.jobs.orchestrator import run_job  # RED until Task 2
 from app.jobs.progress import EventBus
 from app.jobs.resume import infer_resume_point
@@ -340,6 +341,33 @@ async def _sf(s: Settings):
     return make_sessionmaker(engine)
 
 
+def _worker_settings(tmp_data_dir: Path) -> Settings:
+    """Settings with ``run_worker=True`` for tests that drive the worker loop.
+
+    The 04-01 ``_settings`` helper sets ``run_worker=False`` (those tests call
+    ``run_job`` directly). The 04-02 worker tests call ``run_worker``, which
+    guards on ``settings.run_worker`` -- so they need it True to actually run.
+    """
+    return Settings(
+        data_dir=str(tmp_data_dir / "data"),
+        backend=GpuBackend.CPU,
+        run_worker=True,
+    )
+
+
+def _reset_work_signal() -> None:
+    """Reset the module-level ``_work_signal`` for test isolation.
+
+    pytest-asyncio runs each test in a fresh event loop; the module-level
+    ``asyncio.Event`` created at import time can carry waiters / value from
+    a prior test's loop. Recreating it before each worker test guarantees a
+    clean signal bound to the current test's loop.
+    """
+    import app.jobs.queue as queue_mod
+
+    queue_mod._work_signal = asyncio.Event()
+
+
 async def _make_local_job(s: Settings, sf) -> str:
     """Create a local-source job with a real non-empty source file (D-04)."""
     from sqlalchemy import text
@@ -383,7 +411,8 @@ async def test_restart_rejoin_boot(tmp_data_dir: Path) -> None:
     """
     if not _QUEUE_AVAILABLE:
         pytest.xfail("Task 2: app.jobs.queue + app.jobs.interrupt not implemented yet")
-    s = _settings(tmp_data_dir)
+    _reset_work_signal()
+    s = _worker_settings(tmp_data_dir)
     sf = await _sf(s)
     j1 = await _make_local_job(s, sf)
     j2 = await _make_local_job(s, sf)
@@ -394,20 +423,29 @@ async def test_restart_rejoin_boot(tmp_data_dir: Path) -> None:
         swept = await mark_interrupted_failed(session, s, sf)
     assert swept == 0
 
+    # Monkeypatch the STT loader so run_job does not hit a real model.
+    import app.jobs.orchestrator as orch
+
+    orig_loader = orch._load_stt_adapter
+    orch._load_stt_adapter = lambda _settings: _async_return(FakeAdapter())
+
     # Drive the worker manually (run_worker is a single-pass drain here via a
     # short timeout): pull_next -> run_job -> done, twice.
     bus = EventBus()
     import asyncio
 
     task = asyncio.create_task(run_worker(s, sf, bus=bus))
-    # Give the worker time to drain both queued jobs.
-    async with sf() as session:
-        for _ in range(40):
-            r1 = await get_job(session, j1)
-            r2 = await get_job(session, j2)
-            if r1 and r2 and r1.status == "done" and r2.status == "done":
-                break
-            await asyncio.sleep(0.1)
+    try:
+        # Give the worker time to drain both queued jobs.
+        async with sf() as session:
+            for _ in range(40):
+                r1 = await get_job(session, j1)
+                r2 = await get_job(session, j2)
+                if r1 and r2 and r1.status == "done" and r2.status == "done":
+                    break
+                await asyncio.sleep(0.1)
+    finally:
+        orch._load_stt_adapter = orig_loader
     task.cancel()
     try:
         await asyncio.gather(task, return_exceptions=True)
@@ -474,6 +512,7 @@ async def test_serial_no_concurrency(tmp_data_dir: Path) -> None:
     """
     if not _QUEUE_AVAILABLE:
         pytest.xfail("Task 2: app.jobs.queue not implemented yet")
+    _reset_work_signal()
     import asyncio
     import threading
 
@@ -520,7 +559,7 @@ async def test_serial_no_concurrency(tmp_data_dir: Path) -> None:
                 with lock:
                     inflight -= 1
 
-    s = _settings(tmp_data_dir)
+    s = _worker_settings(tmp_data_dir)
     sf = await _sf(s)
     ids = [await _make_local_job(s, sf) for _ in range(3)]
 
@@ -539,9 +578,8 @@ async def test_serial_no_concurrency(tmp_data_dir: Path) -> None:
     try:
         async with sf() as session:
             for _ in range(60):
-                if all(
-                    (await get_job(session, j)).status == "done" for j in ids
-                ):
+                rows = [await get_job(session, j) for j in ids]
+                if all(r is not None and r.status == "done" for r in rows):
                     break
                 await asyncio.sleep(0.1)
         assert max_inflight <= 1, f"worker ran >1 transcribe concurrently: {max_inflight}"
@@ -681,40 +719,47 @@ async def test_hybrid_wakeup_no_signal(tmp_data_dir: Path) -> None:
     """
     if not _QUEUE_AVAILABLE:
         pytest.xfail("Task 2: app.jobs.queue.run_worker not implemented yet")
+    _reset_work_signal()
     import asyncio
 
-    s = _settings(tmp_data_dir)
+    s = _worker_settings(tmp_data_dir)
     sf = await _sf(s)
     job_id = await _make_local_job(s, sf)
+    # Park the job in ``starting`` so the worker's first pull_next does NOT
+    # find it (simulate an empty queue at worker start). The test then
+    # flips it to ``queued`` WITHOUT calling ``_work_signal.set()`` to
+    # simulate a missed signal (enqueue fired but the set() was lost).
+    await _force_status(sf, job_id, "starting")
 
+    import app.jobs.orchestrator as orch
     import app.jobs.queue as queue_mod
 
-    # Capture the worker's _work_signal and clear it so the enqueue's set()
-    # is "missed" (we will not call set() after enqueue -- we simulate the
-    # race by clearing the signal right after enqueue).
+    orig_loader = orch._load_stt_adapter
+    orch._load_stt_adapter = lambda _settings: _async_return(FakeAdapter())
+
     bus = EventBus()
     task = asyncio.create_task(run_worker(s, sf, bus=bus))
-    # Let the worker reach the wait.
-    await asyncio.sleep(0.05)
-    # Enqueue the job (enqueue calls _work_signal.set()), then immediately
-    # clear the signal to simulate the enqueue firing before the worker
-    # awaited (the set() was lost because the worker had not yet called
-    # wait()).
-    async with sf() as session:
-        await enqueue(job_id, session)
-    queue_mod._work_signal.clear()
-    # The 2s poll timeout should wake the worker and drain the job.
-    async with sf() as session:
-        for _ in range(40):
-            row = await get_job(session, job_id)
-            if row and row.status == "done":
-                break
-            await asyncio.sleep(0.1)
-    async with sf() as session:
-        row = await get_job(session, job_id)
-    assert row is not None and row.status == "done"
-    task.cancel()
     try:
-        await asyncio.gather(task, return_exceptions=True)
-    except Exception:
-        pass
+        # Let the worker reach the wait (pull_next returns None -> await).
+        await asyncio.sleep(0.1)
+        # Flip the job to ``queued`` WITHOUT firing _work_signal (simulate
+        # the missed-signal race: enqueue's set() was lost / never fired).
+        await _force_status(sf, job_id, "queued")
+        queue_mod._work_signal.clear()
+        # The 2s poll timeout should wake the worker and drain the job.
+        async with sf() as session:
+            for _ in range(40):
+                row = await get_job(session, job_id)
+                if row and row.status == "done":
+                    break
+                await asyncio.sleep(0.1)
+        async with sf() as session:
+            row = await get_job(session, job_id)
+        assert row is not None and row.status == "done"
+    finally:
+        orch._load_stt_adapter = orig_loader
+        task.cancel()
+        try:
+            await asyncio.gather(task, return_exceptions=True)
+        except Exception:
+            pass
