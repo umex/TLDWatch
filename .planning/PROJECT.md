@@ -12,7 +12,9 @@ The user can drop in any video and get back a clean, speaker-aware transcript pl
 
 ### Validated
 
-(None yet — ship to validate)
+- ✓ App produces a transcript with timestamps for the entire video — Phase 3 (TRANS-01)
+- ✓ App handles long videos by chunking audio automatically, with fallback when a single-shot job would OOM — Phase 3 (INGEST-05)
+- ✓ App auto-detects the spoken language from the audio — Phase 3 (INGEST-06)
 
 ### Active
 
@@ -21,7 +23,6 @@ The user can drop in any video and get back a clean, speaker-aware transcript pl
 - [ ] User can submit a YouTube playlist URL
 - [ ] App downloads YouTube audio locally and processes it from scratch (no reliance on YouTube's auto-captions)
 - [ ] Playlists are processed sequentially in a single queue; user can pause and resume
-- [ ] App produces a transcript with timestamps for the entire video
 - [ ] App produces a speaker-diarized transcript when multiple speakers are detected
 - [ ] Diarized speakers are labelled "Person 1", "Person 2", etc. by default
 - [ ] User can bulk-rename a speaker (e.g. "Person 1" → "Jim") via clickable speaker chips at the top of the transcript, and all instances update
@@ -33,8 +34,6 @@ The user can drop in any video and get back a clean, speaker-aware transcript pl
   - Investment analysis — pros, cons, tickers, thesis
   - Concept explainer / how-to — concepts taught, how-to steps, glossary
   - Quick recap — 2-3 sentence TL;DR
-- [ ] App handles long videos by chunking audio automatically, with fallback when a single-shot job would OOM
-- [ ] App auto-detects the spoken language from the audio
 - [ ] App persists all completed jobs to local history; user can revisit, edit, and re-export
 - [ ] User can export a job's transcript + summaries as Markdown
 - [ ] Front-end (React) and back-end (Python) are separated and communicate via a job API
@@ -87,8 +86,8 @@ The user can drop in any video and get back a clean, speaker-aware transcript pl
 | YouTube audio is always downloaded and processed from scratch | User wants no size limit and consistency with local video handling; no dependency on YouTube captions being accurate or even present. | — Pending |
 | Four built-in summary templates, no custom editor in v1 | Use cases are concrete and well-shaped; building a prompt editor before validating the templates would be premature. | — Pending |
 | Multi-select summary types per job | One video can be both a meeting and a concept explainer; users should not have to re-run the job for each. | — Pending |
-| Auto-detect language by default | Most workflows don't know the language upfront; auto-detect is the right default. | — Pending |
-| Auto-fallback chunking for long videos | VRAM is the hard ceiling on both machines; chunking is the only way to guarantee a 2-3 hour video doesn't OOM. | — Pending |
+| Auto-detect language by default | Most workflows don't know the language upfront; auto-detect is the right default. | ✓ Delivered Phase 3 |
+| Auto-fallback chunking for long videos | VRAM is the hard ceiling on both machines; chunking is the only way to guarantee a 2-3 hour video doesn't OOM. | ✓ Delivered Phase 3 (split-both-halves + FLOOR_SECONDS=60) |
 | App downloads its own models | Removes a setup step; user just runs the app and it pulls what it needs. | — Pending |
 | Single user, no auth | Removes a whole class of complexity; explicit out-of-scope. | — Pending |
 | Clickable speaker chips + per-line reassignment | Two rename modes: bulk "Person 1 → Jim" and per-line fix when the AI mislabels a segment. | — Pending |
@@ -113,4 +112,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-11 after initialization*
+*Last updated: 2026-06-22 after Phase 3*

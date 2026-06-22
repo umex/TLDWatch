@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: context exhaustion at 76% (2026-06-19)
-last_updated: "2026-06-19T13:21:22.308Z"
-last_activity: 2026-06-19 -- Phase 03 execution started
+status: ready_to_plan
+stopped_at: Phase 03 complete, ready to plan Phase 04 (2026-06-22)
+last_updated: "2026-06-22T17:44:56.605Z"
+last_activity: 2026-06-22 -- Phase 03 marked complete
 progress:
   total_phases: 10
   completed_phases: 3
@@ -18,17 +18,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-11)
+See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** The user can drop in any video and get back a clean, speaker-aware transcript plus summaries shaped for the content type — without it ever leaving the machine.
-**Current focus:** Phase 03 — stt-adapter-audio-chunker-standalone-cli
+**Current focus:** Phase 04 — job-orchestrator-+-persistent-queue-+-websocket-progress
 
 ## Current Position
 
-Phase: 03 (stt-adapter-audio-chunker-standalone-cli) — EXECUTING
-Plan: 3 of 3
-Status: Awaiting human verification (laptop CUDA SC-5) — see 03-UAT.md
-Last activity: 2026-06-19 -- Phase 03 execution started
+Phase: 4 (job-orchestrator-+-persistent-queue-+-websocket-progress) — READY TO PLAN
+Plan: Not started
+Status: Phase 03 complete (verified 11/11, UAT passed, threat-secure 9/9). Ready to plan Phase 04.
+Last activity: 2026-06-22 — Phase 03 marked complete (laptop CUDA SC-5 UAT passed)
 
 Progress: [███░░░░░░░] 30%
 
@@ -36,7 +36,7 @@ Progress: [███░░░░░░░] 30%
 
 **Velocity:**
 
-- Total plans completed: 14
+- Total plans completed: 17
 - Average duration: — min
 - Total execution time: ~4 hours (Phase 01 plans 01..04 + Phase 02 plans 01..02)
 
@@ -46,6 +46,7 @@ Progress: [███░░░░░░░] 30%
 |-------|-------|-------|----------|
 | 01 | 4 | 4 | — |
 | 02 | 5 | - | - |
+| 03 | 3 | - | - |
 
 **Recent Trend:**
 
@@ -92,7 +93,6 @@ None yet.
 Research-flagged unknowns that affect upcoming phases:
 
 - Phase 2: ROCm on Windows for the 6800 XT in mid-2026 — cannot be verified at research time; first-run GPU-burn test must be the ground truth.
-- Phase 3: faster-whisper + int8 version pins, VRAM profile on 8 GB laptop.
 - Phase 6: yt-dlp state for age-gated / region-locked videos in mid-2026.
 - Phase 7: pyannote "expected N speakers" mode exact knob and reliability.
 - Phase 8: Qwen2.5 vs Llama-3 vs Mistral benchmark on laptop + GBNF grammar expressibility for the four templates.
@@ -111,9 +111,9 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-19T13:21:09.884Z
-Stopped at: context exhaustion at 76% (2026-06-19)
-Resume file: .planning/phases/03-stt-adapter-audio-chunker-standalone-cli/03-CONTEXT.md
+Last session: 2026-06-22T17:44:56Z
+Stopped at: Phase 03 complete, ready to plan Phase 04
+Resume file: None
 
 ### Gap-closure wave (01-04) — closed
 
