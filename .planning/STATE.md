@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 04 (job-orchestrator-persistent-queue-websocket-progress) — EXECUTING
-Plan: 2 of 3
-Status: Ready to execute
-Last activity: 2026-06-22 -- Phase 04 execution started
+Plan: 3 of 3
+Status: Ready to execute 04-03
+Last activity: 2026-06-22 -- Plan 04-02 complete (queue + sweep + cancel + watchdog)
 
 Progress: [███░░░░░░░] 30%
 
@@ -59,6 +59,7 @@ Progress: [███░░░░░░░] 30%
 | Phase 03 P02 | 20m | 2 tasks | 6 files |
 | Phase 03 P03 | 25m | 3 tasks | 4 files |
 | Phase 04 P01 | 23m | 4 tasks | 13 files |
+| Phase 04 P02 | 23m | 4 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,7 @@ Recent decisions affecting current work:
 - [Phase ?]: 03-02: condition_on_previous_text=False per chunk (chunked), True (<=30 min fast path) -- Pitfall 8 planner decision
 - [Phase ?]: 03-03: Standalone transcribe CLI + [project.scripts] entry declared HERE (Codex HIGH); --device auto resolves CUDA/CPU from settings via device_for (SC-5); _bootstrap_settings + _get_or_configure_manager close the PATTERNS CLI gap; finally-block adapter.unload(); raw RuntimeError preserved to stderr; SC-5 desktop CPU half VERIFIED (3.09GB snapshot, 20 segs, en), laptop CUDA half DEFERRED; cross-phase manager fix 051b0302 (file=None repos -> snapshot_download) surfaced by SC-5
 - [Phase 04]: Plan 04-01: JobCancelled in neutral app/jobs/errors.py (Fix 5); cancel_flag is threading.Event (NOT asyncio.Event); run_job re-raises non-cancel exceptions after mark_failed but swallows JobCancelled; heartbeat via progress.json mtime + _STAGE_FILE_NAMES inclusion (no os.utime on job_dir).
+- [Phase 04]: Plan 04-02: pull_next uses conditional UPDATE WHERE status='queued' + rowcount check (Fix 6 atomic claim); run_worker uses hybrid Event+poll wakeup asyncio.wait_for(_work_signal.wait(), timeout=2.0) (Fix 1); boot sweep mark_interrupted_failed writes manifest via atomic_write_json (update_stage maps 'failed'->'queued' incorrectly so the documented fallback is used); cancel running path sets _running flag only (no double cancel_job, T-04-06); watchdog excludes queued (Codex MEDIUM); 'starting' added to JobStatus Literal (transient claim state); lifespan teardown cancels worker+watchdog before engine.dispose; app.state.bus/settings/session_factory established (Fix 7-partial).
 
 ### Pending Todos
 

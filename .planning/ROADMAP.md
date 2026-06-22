@@ -132,7 +132,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-02: SQLite-backed queue + restart resume + cancel
+- [x] 04-02: SQLite-backed queue + restart resume + cancel
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
