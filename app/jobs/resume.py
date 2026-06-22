@@ -155,6 +155,21 @@ def is_stage_complete(
       file-backed - there is no ``done.json`` file.
     """
     if stage == "ingested":
+        # D-04 (Phase 4): local-reference ingest records
+        # ``manifest.source_path`` and references the file IN PLACE (no
+        # copy into the job dir). FIRST check the manifest's source_path
+        # resolves to a non-empty file; THEN fall back to the in-job-dir
+        # ``source.<ext>`` variant (Phase 5 upload writes that; Phase 6
+        # YouTube download writes that). The generalized check keeps
+        # both ingest paths working from the same walker.
+        sp = manifest.source_path
+        if sp:
+            try:
+                p = Path(sp)
+                if p.exists() and p.stat().st_size > 0:
+                    return True
+            except OSError:
+                pass
         # Plan 01-04 M2: ``ingested`` requires a non-empty source file.
         # The path helpers iterate ``source.*`` to find any extension.
         d = job_dir(settings, job_id)
