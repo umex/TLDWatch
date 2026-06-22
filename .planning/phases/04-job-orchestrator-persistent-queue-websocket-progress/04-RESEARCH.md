@@ -55,10 +55,12 @@ D-07, D-08, D-09, D-11 implementation details (event bus shape, WS testing, TTL 
 
 | ID | Description | Research Support |
 |----|-------------|------------------|
-| JOB-02 | Persistent job queue survives restart | SQLite `jobs` table + boot reconcile + interrupted sweep (D-03) |
-| JOB-04 | Per-job progress via WebSocket | asyncio event bus + `GET /ws/jobs/{id}/events` snapshot-then-live (D-08) |
-| JOB-05 | Cancel queued/running job, idempotent | `cancel_job` DB-first + cooperative flag; terminal no-op (D-06) |
-| JOB-06 | Idempotent submit (same key → same job) | `Idempotency-Key` header → `idempotency_keys` table (D-07) |
+| JOB-02 | Background jobs / state machine (SC-1) | `run_job` state machine: queued→ingesting→transcribing→done via `update_stage` (D-01, D-04) |
+| JOB-04 | Job queue state persists across restarts (SC-2) | SQLite `jobs` table + boot reconcile + interrupted sweep marks active failed (D-03); queued re-join FIFO |
+| JOB-05 | Cancel queued/running job, idempotent (SC-4) | `cancel_job` DB-first + cooperative `threading.Event` flag; terminal no-op (D-06) |
+| JOB-06 | Per-job progress via WebSocket (SC-3) | asyncio event bus + `GET /ws/jobs/{id}/events` snapshot-then-live (D-08) |
+
+> Note: SC-5 (idempotent submit — `POST /jobs` with same `Idempotency-Key` → existing job ID) is a roadmap success criterion with **no dedicated JOB-XX label**; delivered by 04-03 via `Idempotency-Key` header → `idempotency_keys` table (D-07).
 
 ## Standard Stack
 
@@ -414,11 +416,11 @@ def test_ws_snapshot_then_events(app, fake_stt):
 
 **Remaining [ASSUMED]:** A10 only. All other claims verified against local codebase this session.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does `update_stage` take metadata kwargs (language/duration_s) or just stage?** Confirmed it writes full projected metadata in one UPDATE — orchestrator should pass metadata known after ingest (language, duration_s). Planner should check the exact kwarg names in `manifest.py` beyond line 80.
-2. **Starlette TestClient `websocket_connect` behavior with the async lifespan** — does `with TestClient(app) as client` run the lifespan (starting the real worker)? If yes, tests must use a fixture that swaps in a fake STTAdapter + a worker that does NOT auto-start, OR use `TestClient(app, raise_server_exceptions=True)` with a flag to disable the worker in tests. **Recommendation:** add a `settings.run_worker` flag (default True) that tests set False, then tests drive the worker manually. Planner must define this fixture in Wave 0.
-3. **Idempotency-Key charset/length** — recommend `^[A-Za-z0-9_-]{1,128}$` allowlist (reject before DB — V5 input validation).
+1. **Does `update_stage` take metadata kwargs (language/duration_s) or just stage?** Confirmed it writes full projected metadata in one UPDATE — orchestrator should pass metadata known after ingest (language, duration_s). Planner should check the exact kwarg names in `manifest.py` beyond line 80. **RESOLVED:** 04-01 Task 2 calls `update_stage(settings, session, job_id, "ingested", ManifestPatch(source_path=...))` — the manifest-first/DB-last full-projection path is used.
+2. **Starlette TestClient `websocket_connect` behavior with the async lifespan** — does `with TestClient(app) as client` run the lifespan (starting the real worker)? If yes, tests must use a fixture that swaps in a fake STTAdapter + a worker that does NOT auto-start, OR use `TestClient(app, raise_server_exceptions=True)` with a flag to disable the worker in tests. **Recommendation:** add a `settings.run_worker` flag (default True) that tests set False, then tests drive the worker manually. Planner must define this fixture in Wave 0. **RESOLVED:** 04-01 Task 1 adds `Settings.run_worker: bool = True`; 04-02 Task 2 consumes it (does NOT re-add); tests set it False and drive the worker manually.
+3. **Idempotency-Key charset/length** — recommend `^[A-Za-z0-9_-]{1,128}$` allowlist (reject before DB — V5 input validation). **RESOLVED:** 04-03 Task 3 implements `validate_idempotency_key` with regex `^[A-Za-z0-9_-]{1,128}$`, rejected before DB write.
 
 ## Environment Availability
 

@@ -45,10 +45,10 @@ created: 2026-06-22
 | 04-02-02 | 02 | 1 | D-10 | — | worker=1 serial — no two jobs transcribe concurrently | unit | `pytest tests/test_orchestrator.py::test_serial_no_concurrency -x` | ❌ W0 | ⬜ pending |
 | 04-02-03 | 02 | 1 | JOB-05 / SC-4 | T-04-04 | cancel: queued=instant DB-first+rmtree, running=cooperative stop-after-chunk+discard partial, terminal=no-op returning current row | unit | `pytest tests/test_cancel.py -x` | ❌ W0 | ⬜ pending |
 | 04-02-04 | 02 | 1 | D-11 | T-04-stale | stale-sweep watchdog marks stale after 10-min; status-aware (skip done/failed/cancelled) | unit | `pytest tests/test_orchestrator.py::test_watchdog_stale -x` | ❌ W0 | ⬜ pending |
-| 04-03-01 | 03 | 2 | JOB-04 / SC-3 | T-04-02 | WS endpoint broadcasts stage/percent/ETA; snapshot-on-connect then live; cap subscribers per job (DoS) | integration | `pytest tests/test_ws.py::test_progress_events -x` | ❌ W0 | ⬜ pending |
-| 04-03-02 | 03 | 2 | JOB-06 / SC-5 | T-04-03 | POST /jobs same Idempotency-Key → same job_id + 200; UNIQUE(key) + IntegrityError catch for concurrent dup race | unit | `pytest tests/test_idempotency.py::test_dup_key_returns_existing -x` | ❌ W0 | ⬜ pending |
-| 04-03-03 | 03 | 2 | D-08 | T-04-bus | event bus pub/sub; Queue maxsize=32 drop-oldest backpressure (no memory blowup) | unit | `pytest tests/test_event_bus.py -x` | ❌ W0 | ⬜ pending |
-| 04-03-04 | 03 | 2 | JOB-06 / SC-5 | T-04-01 | Idempotency-Key header validation: cap length (~128), charset `^[A-Za-z0-9_-]{1,128}$`, reject before DB | unit | `pytest tests/test_idempotency.py::test_key_validation -x` | ❌ W0 | ⬜ pending |
+| 04-03-01 | 03 | 3 | JOB-06 / SC-3 | T-04-02 | WS endpoint broadcasts stage/percent/ETA; snapshot-on-connect then live; cap subscribers per job (DoS) | integration | `pytest tests/test_ws.py::test_progress_events -x` | ❌ W0 | ⬜ pending |
+| 04-03-02 | 03 | 3 | SC-5 (no JOB-XX) | T-04-03 | POST /jobs same Idempotency-Key → same job_id + 200; UNIQUE(key) + IntegrityError catch for concurrent dup race | unit | `pytest tests/test_idempotency.py::test_dup_key_returns_existing -x` | ❌ W0 | ⬜ pending |
+| 04-03-03 | 03 | 3 | D-08 | T-04-bus | event bus pub/sub; Queue maxsize=32 drop-oldest backpressure (no memory blowup) | unit | `pytest tests/test_event_bus.py -x` | ❌ W0 | ⬜ pending |
+| 04-03-04 | 03 | 3 | SC-5 (no JOB-XX) | T-04-01 | Idempotency-Key header validation: cap length (~128), charset `^[A-Za-z0-9_-]{1,128}$`, reject before DB | unit | `pytest tests/test_idempotency.py::test_key_validation -x` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 *Wave 0 (W0) = test file must be stubbed before execution so the sampling loop has a target.*

@@ -125,11 +125,17 @@ Plans:
   5. The double-submit problem is handled — a `POST /jobs` with the same idempotency key returns the existing job ID instead of creating a duplicate.
 
 **Plans**: TBD
-
 Plans:
+**Wave 1**
 
 - [ ] 04-01: State machine + file-as-truth transitions
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 04-02: SQLite-backed queue + restart resume + cancel
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 04-03: WebSocket progress pub/sub + idempotent submit
 
 ### Phase 5: Local File Ingest + History UI + 3-Pane Layout
