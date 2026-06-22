@@ -519,6 +519,58 @@ def fake_audio_array() -> "object":
     return np.zeros(16000 * 30, dtype="float32")
 
 
+# --- Phase 4 plan 04-02 fixtures -------------------------------------------
+#
+# ``fake_stt`` reuses the 04-01 FakeAdapter (which already honors
+# ``progress_cb`` / ``cancel_flag`` per Fix 8) so the 04-02 queue / cancel /
+# watchdog tests can drive a multi-chunk transcription deterministically
+# without touching a real STT model. ``run_worker_off`` is a sanity alias that
+# asserts the test settings opt out of the lifespan auto-start (the
+# ``tmp_data_dir`` fixture already writes ``run_worker=False`` -- 04-01 added
+# that -- so this fixture only documents the invariant for tests that rely on
+# driving the worker manually).
+#
+# The existing ``client`` fixture (above) already does NOT auto-start the
+# worker: the lifespan only starts one when ``settings.run_worker`` is True,
+# and ``tmp_data_dir`` writes ``run_worker=False``. So 04-02 reuses the
+# existing async ``client`` fixture unchanged (no duplicate non-auto-start
+# TestClient is added).
+
+
+@pytest.fixture
+def fake_stt() -> "object":
+    """Return a :class:`tests._stt_fake.FakeAdapter` configured for N fake chunks.
+
+    The default returns a single fast-path segment per ``transcribe`` call
+    (matches the orchestrator tests' contract). Tests that need a
+    multi-chunk fake override ``segments_per_chunk`` on the returned instance
+    or construct their own :class:`FakeAdapter` directly -- this fixture is
+    the cheap default for the simple ``run_worker`` drain tests.
+    """
+    from tests._stt_fake import FakeAdapter
+
+    return FakeAdapter()
+
+
+@pytest.fixture
+def run_worker_off(tmp_data_dir: Path) -> Path:
+    """Sanity alias asserting the test settings opt out of worker auto-start.
+
+    The ``tmp_data_dir`` fixture already writes ``run_worker=False`` (04-01
+    added that so the 04-02 lifespan does not auto-start the worker). This
+    fixture re-yields ``tmp_data_dir`` after asserting the invariant so a
+    test that drives the worker manually can declare the dependency by name
+    and fail loudly if a future fixture change re-enables auto-start.
+    """
+    from app.settings import service as settings_service
+
+    settings = settings_service.current()
+    assert settings.run_worker is False, (
+        "run_worker_off: test settings must opt out of lifespan auto-start"
+    )
+    return tmp_data_dir
+
+
 @pytest.fixture
 def mock_ct2_supported_compute_types(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Patch ``ctranslate2.get_supported_compute_types`` for the int8 tests.

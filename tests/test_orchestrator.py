@@ -290,3 +290,431 @@ async def test_progress_snapshot_persisted(tmp_data_dir: Path) -> None:
         assert field in snapshot, f"progress.json missing {field}"
     assert snapshot["chunks_done"] >= 1
     assert snapshot["chunks_total"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 plan 04-02 -- Wave 0 test scaffolding (TDD RED-first).
+#
+# The tests below cover the 04-02 surface: the SQLite-backed FIFO worker
+# (atomic claim -- Fix 6, hybrid Event + poll wakeup -- Fix 1, strict
+# serial D-10), the boot interrupted-job sweep (mark_interrupted_failed --
+# DB AND manifest, excludes queued per Codex MEDIUM), and the stale-sweep
+# watchdog (excludes queued -- Codex MEDIUM; 04-01 heartbeat keeps active
+# transcribing jobs fresh -- Fix 2).
+#
+# Imports of ``app.jobs.queue`` (enqueue / pull_next / run_worker / cancel /
+# run_watchdog) and ``app.jobs.interrupt`` (mark_interrupted_failed) are
+# guarded behind try/except or done lazily so collection succeeds before
+# Tasks 2-4 land. The xfail markers stop pytest from failing on the missing
+# symbols; once a task lands the relevant xfail is removed (Task 2 removes
+# the queue/interrupt xfails, Task 3 the cancel/watchdog ones, Task 4 the
+# lifespan-wiring one).
+# ---------------------------------------------------------------------------
+
+try:  # Wave-0 import guard: queue + interrupt land in Tasks 2/3.
+    from app.jobs.queue import (  # noqa: F401
+        enqueue,
+        pull_next,
+        run_worker,
+    )
+    from app.jobs.interrupt import mark_interrupted_failed  # noqa: F401
+
+    _QUEUE_AVAILABLE = True
+except ImportError:  # pragma: no cover - resolved once Task 2/3 land
+    _QUEUE_AVAILABLE = False
+
+try:
+    from app.jobs.queue import cancel, run_watchdog  # noqa: F401
+
+    _CANCEL_AVAILABLE = True
+except ImportError:  # pragma: no cover - resolved once Task 3 lands
+    _CANCEL_AVAILABLE = False
+
+
+async def _sf(s: Settings):
+    """Build a session factory against a fresh engine + migrations (04-02 helper)."""
+    from app.storage.db import apply_migrations, make_engine, make_sessionmaker
+
+    engine = make_engine(s)
+    await apply_migrations(engine)
+    return make_sessionmaker(engine)
+
+
+async def _make_local_job(s: Settings, sf) -> str:
+    """Create a local-source job with a real non-empty source file (D-04)."""
+    from sqlalchemy import text
+
+    async with sf() as session:
+        job = await create_job(session, s, source_type="local")
+        job_id = job.id
+        await ensure_job_dir(s, job_id)
+        src = job_dir(s, job_id) / "source.mp4"
+        src.write_bytes(b"\x00" * 16)
+        m = await read_manifest(s, job_id)
+        m = m.model_copy(update={"source_path": str(src)})
+        await write_manifest(s, m)
+        await session.execute(
+            text("UPDATE jobs SET source_path = :p WHERE id = :id"),
+            {"p": str(src), "id": job_id},
+        )
+        await session.commit()
+    return job_id
+
+
+async def _force_status(sf, job_id: str, status: str) -> None:
+    """Force a job row to ``status`` (bypasses the state machine -- test only)."""
+    from sqlalchemy import text
+
+    async with sf() as session:
+        await session.execute(
+            text("UPDATE jobs SET status = :s WHERE id = :id"),
+            {"s": status, "id": job_id},
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_restart_rejoin_boot(tmp_data_dir: Path) -> None:
+    """Queued jobs survive a restart and re-join the FIFO on boot (SC-2, D-02).
+
+    Insert two queued rows (simulating a backend restart), run the boot sweep
+    (mark_interrupted_failed -- a no-op for queued), then drive the worker
+    (run_worker) once and assert BOTH jobs complete to ``done`` in FIFO order.
+    """
+    if not _QUEUE_AVAILABLE:
+        pytest.xfail("Task 2: app.jobs.queue + app.jobs.interrupt not implemented yet")
+    s = _settings(tmp_data_dir)
+    sf = await _sf(s)
+    j1 = await _make_local_job(s, sf)
+    j2 = await _make_local_job(s, sf)
+
+    # Boot sweep runs AFTER reconcile_all and BEFORE the worker (Task 4
+    # wiring). For queued jobs it is a no-op (D-03 -- queued re-join FIFO).
+    async with sf() as session:
+        swept = await mark_interrupted_failed(session, s, sf)
+    assert swept == 0
+
+    # Drive the worker manually (run_worker is a single-pass drain here via a
+    # short timeout): pull_next -> run_job -> done, twice.
+    bus = EventBus()
+    import asyncio
+
+    task = asyncio.create_task(run_worker(s, sf, bus=bus))
+    # Give the worker time to drain both queued jobs.
+    async with sf() as session:
+        for _ in range(40):
+            r1 = await get_job(session, j1)
+            r2 = await get_job(session, j2)
+            if r1 and r2 and r1.status == "done" and r2.status == "done":
+                break
+            await asyncio.sleep(0.1)
+    task.cancel()
+    try:
+        await asyncio.gather(task, return_exceptions=True)
+    except Exception:
+        pass
+
+    async with sf() as session:
+        r1 = await get_job(session, j1)
+        r2 = await get_job(session, j2)
+    assert r1 is not None and r1.status == "done"
+    assert r2 is not None and r2.status == "done"
+
+
+@pytest.mark.asyncio
+async def test_boot_interrupted_sweep(tmp_data_dir: Path) -> None:
+    """Boot sweep marks only ingesting/transcribing failed in DB AND manifest (D-03).
+
+    Queued jobs are NOT swept (they re-join FIFO). The sweep updates BOTH the
+    DB row and the manifest so a subsequent ``reconcile_all`` does not revert
+    the change (Codex MEDIUM -- manifest is the source of truth).
+    """
+    if not _QUEUE_AVAILABLE:
+        pytest.xfail("Task 2: app.jobs.interrupt not implemented yet")
+    s = _settings(tmp_data_dir)
+    sf = await _sf(s)
+    ingesting_id = await _make_local_job(s, sf)
+    transcribing_id = await _make_local_job(s, sf)
+    queued_id = await _make_local_job(s, sf)
+    await _force_status(sf, ingesting_id, "ingesting")
+    await _force_status(sf, transcribing_id, "transcribing")
+    # queued_id stays ``queued`` (create_job default).
+
+    async with sf() as session:
+        swept = await mark_interrupted_failed(session, s, sf)
+
+    assert swept == 2
+    async with sf() as session:
+        rows = {
+            j: (await get_job(session, j)).status
+            for j in (ingesting_id, transcribing_id, queued_id)
+        }
+    assert rows[ingesting_id] == "failed"
+    assert rows[transcribing_id] == "failed"
+    assert rows[queued_id] == "queued"  # NOT swept (D-03)
+    # Manifest is also failed for the swept jobs (Codex MEDIUM).
+    m_ing = await read_manifest(s, ingesting_id)
+    m_tr = await read_manifest(s, transcribing_id)
+    assert m_ing.status == "failed"
+    assert m_tr.status == "failed"
+    assert m_ing.error == "interrupted (backend restarted)"
+    assert m_tr.error == "interrupted (backend restarted)"
+    # Source folders are preserved (mark_failed keeps the folder; no rmtree).
+    assert job_dir(s, ingesting_id).exists()
+    assert job_dir(s, transcribing_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_serial_no_concurrency(tmp_data_dir: Path) -> None:
+    """Worker=1 strict serial: 3 enqueued jobs run strictly one-at-a-time (D-10).
+
+    A semaphore-asserting FakeAdapter fails if more than one transcribe is
+    in-flight simultaneously. With a single asyncio worker task there is no
+    ``asyncio.gather`` of multiple jobs, so the semaphore is never >1.
+    """
+    if not _QUEUE_AVAILABLE:
+        pytest.xfail("Task 2: app.jobs.queue not implemented yet")
+    import asyncio
+    import threading
+
+    inflight = 0
+    max_inflight = 0
+    lock = threading.Lock()
+
+    class _SerialFakeAdapter:
+        """Wraps FakeAdapter with a concurrency guard (mirrors the adapter Protocol)."""
+
+        def __init__(self) -> None:
+            self._inner = FakeAdapter()
+            self.loaded = False
+
+        def load(self) -> None:
+            self._inner.load()
+            self.loaded = self._inner.loaded
+
+        def unload(self) -> None:
+            self._inner.unload()
+            self.loaded = self._inner.loaded
+
+        def decode_audio(self, path):  # noqa: ANN001
+            return self._inner.decode_audio(path)
+
+        def detect_language(self, audio):  # noqa: ANN001
+            return self._inner.detect_language(audio)
+
+        def transcribe(self, audio, language=None, vad_filter=True, condition_on_previous_text=True, *, progress_cb=None, cancel_flag=None):  # noqa: ANN001
+            nonlocal inflight, max_inflight
+            with lock:
+                inflight += 1
+                max_inflight = max(max_inflight, inflight)
+            try:
+                return self._inner.transcribe(
+                    audio,
+                    language=language,
+                    vad_filter=vad_filter,
+                    condition_on_previous_text=condition_on_previous_text,
+                    progress_cb=progress_cb,
+                    cancel_flag=cancel_flag,
+                )
+            finally:
+                with lock:
+                    inflight -= 1
+
+    s = _settings(tmp_data_dir)
+    sf = await _sf(s)
+    ids = [await _make_local_job(s, sf) for _ in range(3)]
+
+    # The worker pulls a queued job and calls run_job, which loads the STT
+    # adapter via the production path when ``adapter is None``. To keep this
+    # test hermetic, monkeypatch the orchestrator's ``_load_stt_adapter`` to
+    # return our SerialFakeAdapter.
+    import app.jobs.orchestrator as orch
+
+    fake = _SerialFakeAdapter()
+    orig_loader = orch._load_stt_adapter
+    orch._load_stt_adapter = lambda _settings: _async_return(fake)
+
+    bus = EventBus()
+    task = asyncio.create_task(run_worker(s, sf, bus=bus))
+    try:
+        async with sf() as session:
+            for _ in range(60):
+                if all(
+                    (await get_job(session, j)).status == "done" for j in ids
+                ):
+                    break
+                await asyncio.sleep(0.1)
+        assert max_inflight <= 1, f"worker ran >1 transcribe concurrently: {max_inflight}"
+    finally:
+        orch._load_stt_adapter = orig_loader
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def _async_return(value):
+    """Tiny coroutine returning ``value`` (for monkeypatching async loaders)."""
+    return value
+
+
+class _SerialFakeAdapterAdapter:  # pragma: no cover - retained for forward compat
+    """Holder that exposes a single shared SerialFakeAdapter instance.
+
+    Retained as a named wrapper in case a future test needs to attach extra
+    knobs to the fake without subclassing. The current serial-concurrency
+    test returns the bare :class:`_SerialFakeAdapter` from the monkeypatched
+    ``_load_stt_adapter``.
+    """
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+
+@pytest.mark.asyncio
+async def test_watchdog_stale(tmp_data_dir: Path) -> None:
+    """Watchdog marks stale active jobs every 60s; excludes queued (Codex MEDIUM).
+
+    A job in ``transcribing`` whose ``last_stage_mtime`` is older than the
+    600s threshold is marked stale (``mark_stale`` reuses the status-aware
+    gate from cleanup). A terminal job short-circuits. A QUEUED job is NOT
+    swept (the watchdog SELECT filters to ``status IN
+    ('ingesting','transcribing')`` -- Codex MEDIUM).
+    """
+    if not _CANCEL_AVAILABLE:
+        pytest.xfail("Task 3: app.jobs.queue.run_watchdog not implemented yet")
+    import asyncio
+    import os
+    import time
+
+    s = _settings(tmp_data_dir)
+    sf = await _sf(s)
+    active_id = await _make_local_job(s, sf)
+    terminal_id = await _make_local_job(s, sf)
+    queued_id = await _make_local_job(s, sf)
+    await _force_status(sf, active_id, "transcribing")
+    await _force_status(sf, terminal_id, "done")
+    # queued_id stays ``queued``.
+
+    # Backdate every stage file for the active job so is_stale returns True.
+    old = time.time() - 3600
+    for name in ("manifest.json", "transcript.json"):
+        p = job_dir(s, active_id) / name
+        if p.exists():
+            os.utime(p, (old, old))
+    src = job_dir(s, active_id) / "source.mp4"
+    if src.exists():
+        os.utime(src, (old, old))
+
+    from app.jobs.cleanup import is_stale
+
+    assert is_stale(s, active_id, threshold_s=600) is True
+
+    # Drive the watchdog once with a very short sleep override. We cannot
+    # wait 60s in a test, so we call the internal tick directly by
+    # monkeypatching asyncio.sleep to a no-op and cancelling after one tick.
+    import app.jobs.queue as queue_mod
+
+    real_sleep = asyncio.sleep
+    sleep_calls = []
+
+    async def _fast_sleep(secs):
+        sleep_calls.append(secs)
+        # One real yield so the loop can cancel cleanly.
+        await real_sleep(0)
+
+    queue_mod.asyncio.sleep = _fast_sleep  # type: ignore[attr-defined]
+
+    task = asyncio.create_task(run_watchdog(s, sf))
+    # Let one tick fire.
+    await real_sleep(0.2)
+    task.cancel()
+    try:
+        await asyncio.gather(task, return_exceptions=True)
+    finally:
+        queue_mod.asyncio.sleep = real_sleep  # type: ignore[attr-defined]
+
+    async with sf() as session:
+        active_row = await get_job(session, active_id)
+        terminal_row = await get_job(session, terminal_id)
+        queued_row = await get_job(session, queued_id)
+    assert active_row is not None and active_row.status == "failed"
+    assert terminal_row is not None and terminal_row.status == "done"
+    assert queued_row is not None and queued_row.status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_atomic_claim_two_workers(tmp_data_dir: Path) -> None:
+    """Two concurrent pull_next calls on the same queued job -> only one wins (Fix 6).
+
+    The atomic claim is a conditional ``UPDATE jobs SET status='starting'
+    WHERE id=:id AND status='queued'``; only the worker whose UPDATE changes
+    exactly one row proceeds. The other gets ``rowcount == 0`` and returns
+    ``None`` (re-poll or exit).
+    """
+    if not _QUEUE_AVAILABLE:
+        pytest.xfail("Task 2: app.jobs.queue.pull_next not implemented yet")
+    import asyncio
+
+    s = _settings(tmp_data_dir)
+    sf = await _sf(s)
+    job_id = await _make_local_job(s, sf)
+
+    async with sf() as session_a, sf() as session_b:
+        # Race two pull_next calls against the same single queued row.
+        a, b = await asyncio.gather(
+            pull_next(session_a), pull_next(session_b)
+        )
+
+    # Exactly one of (a, b) is the job_id; the other is None.
+    winners = [x for x in (a, b) if x is not None]
+    assert len(winners) == 1, f"both workers claimed the same job: {a=}, {b=}"
+    assert winners[0] == job_id
+
+
+@pytest.mark.asyncio
+async def test_hybrid_wakeup_no_signal(tmp_data_dir: Path) -> None:
+    """A missed _work_signal self-heals via the 2s poll timeout (Fix 1).
+
+    Start the worker so it awaits ``_work_signal.wait()``; the test then
+    enqueues a job WITHOUT calling ``_work_signal.set()`` (simulating a missed
+    signal -- the enqueue fired before the worker awaited). The 2s poll
+    timeout in ``run_worker`` catches the new job and drains it.
+    """
+    if not _QUEUE_AVAILABLE:
+        pytest.xfail("Task 2: app.jobs.queue.run_worker not implemented yet")
+    import asyncio
+
+    s = _settings(tmp_data_dir)
+    sf = await _sf(s)
+    job_id = await _make_local_job(s, sf)
+
+    import app.jobs.queue as queue_mod
+
+    # Capture the worker's _work_signal and clear it so the enqueue's set()
+    # is "missed" (we will not call set() after enqueue -- we simulate the
+    # race by clearing the signal right after enqueue).
+    bus = EventBus()
+    task = asyncio.create_task(run_worker(s, sf, bus=bus))
+    # Let the worker reach the wait.
+    await asyncio.sleep(0.05)
+    # Enqueue the job (enqueue calls _work_signal.set()), then immediately
+    # clear the signal to simulate the enqueue firing before the worker
+    # awaited (the set() was lost because the worker had not yet called
+    # wait()).
+    async with sf() as session:
+        await enqueue(job_id, session)
+    queue_mod._work_signal.clear()
+    # The 2s poll timeout should wake the worker and drain the job.
+    async with sf() as session:
+        for _ in range(40):
+            row = await get_job(session, job_id)
+            if row and row.status == "done":
+                break
+            await asyncio.sleep(0.1)
+    async with sf() as session:
+        row = await get_job(session, job_id)
+    assert row is not None and row.status == "done"
+    task.cancel()
+    try:
+        await asyncio.gather(task, return_exceptions=True)
+    except Exception:
+        pass
