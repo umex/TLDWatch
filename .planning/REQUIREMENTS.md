@@ -19,7 +19,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Job Management
 
 - [ ] **JOB-01**: Playlists are processed sequentially in a single queue; user can pause and resume
-- [ ] **JOB-02**: Jobs run in the background — user can navigate away and return to status
+- [x] **JOB-02**: Jobs run in the background — user can navigate away and return to status
 - [ ] **JOB-03**: App persists all completed jobs to local history; user can revisit, edit, and re-export
 - [ ] **JOB-04**: Job queue state persists across app restarts
 - [ ] **JOB-05**: User can cancel a queued or running job
@@ -132,7 +132,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INGEST-05 | Phase 3 | Complete |
 | INGEST-06 | Phase 3 | Complete |
 | JOB-01 | Phase 6 | Pending |
-| JOB-02 | Phase 4 | Pending |
+| JOB-02 | Phase 4 | Complete |
 | JOB-03 | Phase 5 | Pending |
 | JOB-04 | Phase 4 | Pending |
 | JOB-05 | Phase 4 | Pending |

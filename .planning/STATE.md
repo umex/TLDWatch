@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: context exhaustion at 81% (2026-06-22)
-last_updated: "2026-06-22T22:15:10.270Z"
-last_activity: 2026-06-22 — Phase 03 marked complete (laptop CUDA SC-5 UAT passed)
+last_updated: "2026-06-22T23:25:26.514Z"
+last_activity: 2026-06-22 -- Phase 04 execution started
 progress:
   total_phases: 10
   completed_phases: 3
-  total_plans: 12
-  completed_plans: 12
+  total_plans: 15
+  completed_plans: 13
   percent: 30
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** The user can drop in any video and get back a clean, speaker-aware transcript plus summaries shaped for the content type — without it ever leaving the machine.
-**Current focus:** Phase 04 — job-orchestrator-+-persistent-queue-+-websocket-progress
+**Current focus:** Phase 04 — job-orchestrator-persistent-queue-websocket-progress
 
 ## Current Position
 
-Phase: 4 (job-orchestrator-+-persistent-queue-+-websocket-progress) — READY TO PLAN
-Plan: Not started
+Phase: 04 (job-orchestrator-persistent-queue-websocket-progress) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-06-22 — Phase 03 marked complete (laptop CUDA SC-5 UAT passed)
+Last activity: 2026-06-22 -- Phase 04 execution started
 
 Progress: [███░░░░░░░] 30%
 
@@ -58,6 +58,7 @@ Progress: [███░░░░░░░] 30%
 | Phase 03 P01 | 6m | 2 tasks | 8 files |
 | Phase 03 P02 | 20m | 2 tasks | 6 files |
 | Phase 03 P03 | 25m | 3 tasks | 4 files |
+| Phase 04 P01 | 23m | 4 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,7 @@ Recent decisions affecting current work:
 - [Phase ?]: 03-02: STTAdapter Protocol gained decode_audio so the chunker decodes without importing faster_whisper (SC-4 preserved)
 - [Phase ?]: 03-02: condition_on_previous_text=False per chunk (chunked), True (<=30 min fast path) -- Pitfall 8 planner decision
 - [Phase ?]: 03-03: Standalone transcribe CLI + [project.scripts] entry declared HERE (Codex HIGH); --device auto resolves CUDA/CPU from settings via device_for (SC-5); _bootstrap_settings + _get_or_configure_manager close the PATTERNS CLI gap; finally-block adapter.unload(); raw RuntimeError preserved to stderr; SC-5 desktop CPU half VERIFIED (3.09GB snapshot, 20 segs, en), laptop CUDA half DEFERRED; cross-phase manager fix 051b0302 (file=None repos -> snapshot_download) surfaced by SC-5
+- [Phase 04]: Plan 04-01: JobCancelled in neutral app/jobs/errors.py (Fix 5); cancel_flag is threading.Event (NOT asyncio.Event); run_job re-raises non-cancel exceptions after mark_failed but swallows JobCancelled; heartbeat via progress.json mtime + _STAGE_FILE_NAMES inclusion (no os.utime on job_dir).
 
 ### Pending Todos
 
@@ -111,7 +113,7 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-22T18:28:42.080Z
+Last session: 2026-06-22T23:25:26.506Z
 Stopped at: context exhaustion at 81% (2026-06-22)
 Resume file: .planning/phases/04-job-orchestrator-persistent-queue-websocket-progress/04-CONTEXT.md
 

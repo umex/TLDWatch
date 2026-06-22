@@ -128,7 +128,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 04-01: State machine + file-as-truth transitions
+- [x] 04-01: State machine + file-as-truth transitions
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -280,7 +280,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 1. Back-end Skeleton + Storage + Data Layout | 3/3 | Complete   | 2026-06-14 |
 | 2. GPU Backend Detection + Model Manager | 5/5 | Complete    | 2026-06-19 |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 3/3 | Complete    | 2026-06-22 |
-| 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 0/3 | Not started | - |
+| 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 1/3 | In Progress|  |
 | 5. Local File Ingest + History UI + 3-Pane Layout | 0/3 | Not started | - |
 | 6. YouTube Ingest + Sequential Playlist Queue | 0/3 | Not started | - |
 | 7. Diarization Adapter + Speaker Rename Cluster | 0/3 | Not started | - |
