@@ -36,9 +36,10 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any
+import threading
+from typing import Any, Callable
 
-from app.models.stt.protocol import SttSegment, SttTranscription
+from app.models.stt.protocol import ChunkProgress, SttSegment, SttTranscription
 
 _log = logging.getLogger(__name__)
 
@@ -142,6 +143,9 @@ class FasterWhisperAdapter:
         language: str | None = None,
         vad_filter: bool = True,
         condition_on_previous_text: bool = True,
+        *,
+        progress_cb: "Callable[[ChunkProgress], None] | None" = None,
+        cancel_flag: "threading.Event | None" = None,
     ) -> SttTranscription:
         """Transcribe ``audio`` and map faster-whisper segments to SttSegment.
 
@@ -150,6 +154,22 @@ class FasterWhisperAdapter:
         :param language: ``None`` triggers faster-whisper auto-detect on
             the first 30 s (D-07, INGEST-06); the detected language is
             recorded on the returned :class:`SttTranscription`.
+
+        Fix 8 (plan 04-01): the kw-only ``progress_cb`` / ``cancel_flag``
+        superset is ACCEPTED so the production adapter matches the
+        extended :class:`~app.models.stt.protocol.STTAdapter` Protocol
+        — a caller (the orchestrator on the fast path, or a future
+        direct-adapter caller) passing these kwargs MUST NOT raise
+        ``TypeError``. The chunker handles cancel-check + per-chunk
+        progress emit at its OWN loop boundary (it does not forward
+        these kwargs here), so this method does NOT itself consult
+        ``cancel_flag`` or invoke ``progress_cb``. The kwargs are
+        accepted purely for Protocol conformance / the no-TypeError
+        contract (Fix 8). A single-call fast path has no chunk
+        boundary to check at, so cooperative cancel within a single
+        ``faster_whisper`` call is out of scope (D-06 — cancel stops at
+        the next chunk boundary, which on the fast path is "after this
+        call returns").
         """
         # Leave chunk_length at the default 30 (Pitfall: do NOT set a
         # non-30 value -- the chunker handles long-form chunking itself).

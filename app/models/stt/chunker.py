@@ -55,10 +55,18 @@ for this plan.
 from __future__ import annotations
 
 import logging
+import math
 import re
-from typing import Optional
+import threading
+from typing import Callable, Optional
 
-from app.models.stt.protocol import STTAdapter, SttSegment, SttTranscription
+from app.jobs.errors import JobCancelled  # Fix 5: horizontal import (NOT upward into orchestrator)
+from app.models.stt.protocol import (
+    STTAdapter,
+    ChunkProgress,
+    SttSegment,
+    SttTranscription,
+)
 from app.models.transcript import Transcript, TranscriptSegment
 
 _log = logging.getLogger(__name__)
@@ -83,6 +91,8 @@ def transcribe_file(
     *,
     language: Optional[str] = None,
     job_id: str = "cli",
+    progress_cb: "Callable[[ChunkProgress], None] | None" = None,
+    cancel_flag: "threading.Event | None" = None,
 ) -> Transcript:
     """Transcribe ``audio_path`` into a single :class:`Transcript` (D-02, INGEST-05).
 
@@ -100,6 +110,19 @@ def transcribe_file(
         first 30 s (D-07, INGEST-06); the detected language is passed to
         every chunk and recorded on the returned :class:`Transcript`.
     :param job_id: recorded on the returned :class:`Transcript`.
+    :param progress_cb: Phase 4 (D-09): optional callback invoked once
+        per chunk boundary with cumulative :class:`ChunkProgress`. The
+        callback is SYNC (the chunker runs off-loop in a worker thread);
+        the orchestrator marshals events back to the asyncio loop via
+        ``loop.call_soon_threadsafe``. ``None`` keeps the standalone
+        CLI call unchanged.
+    :param cancel_flag: Phase 4 (D-06): optional ``threading.Event``
+        checked at the TOP of each chunk iteration. When set, the
+        chunker raises :class:`JobCancelled` at the next chunk boundary
+        (cooperative cancel -- stops within one chunk). ``None`` keeps
+        the standalone CLI call unchanged. The orchestrator passes a
+        ``threading.Event`` (NOT ``asyncio.Event``) so the flag is
+        settable from the asyncio side without crossing loop boundaries.
     """
     # 1. Decode once (D-01 PyAV). The decode lives on the adapter (SC-4).
     audio = adapter.decode_audio(audio_path)
@@ -108,6 +131,11 @@ def transcribe_file(
 
     # 2. Fast path: <=30 min -> single transcribe() call.
     if total_seconds <= SINGLE_CALL_THRESHOLD_SECONDS:
+        # D-06 cooperative cancel: check once before the single call. A
+        # single-call fast path has no mid-call boundary, so this is the
+        # only chance to observe a pre-call cancel.
+        if cancel_flag is not None and cancel_flag.is_set():
+            raise JobCancelled(job_id)
         result = adapter.transcribe(
             audio,
             language=language,
@@ -115,6 +143,11 @@ def transcribe_file(
             # Pitfall 8: the default True is fine for short audio.
             condition_on_previous_text=True,
         )
+        # D-09: emit one progress event covering the whole fast-path call.
+        if progress_cb is not None:
+            progress_cb(
+                ChunkProgress(chunks_done=1, chunks_total=1, chunk_start_s=0.0)
+            )
         segments = [
             TranscriptSegment(
                 start_s=float(s.start_s),
@@ -140,11 +173,28 @@ def transcribe_file(
     step_samples = step_seconds * SAMPLE_RATE
     window_samples = WINDOW_SECONDS * SAMPLE_RATE
 
+    # D-09: compute the total chunk count ONCE so each progress event
+    # carries a stable denominator. ``math.ceil`` matches the while-loop
+    # condition (start_sample < total_samples advances by step_samples).
+    # Guard against zero division -- if total_seconds == 0 the fast path
+    # above already applied, so step_seconds > 0 here by construction.
+    total_chunks = math.ceil(total_seconds / step_seconds) if step_seconds > 0 else 1
+
     merged: list[TranscriptSegment] = []
     prev_chunk_end = 0.0  # chunk 0 keeps all its segments (no prior chunk)
     chunk_count = 0
     start_sample = 0
     while start_sample < total_samples:
+        # D-06 cooperative cancel (Fix 3): check at the TOP of the chunk
+        # loop body BEFORE the transcribe call. The cancel_flag is a
+        # threading.Event (NOT asyncio.Event) so the orchestrator's
+        # asyncio side can set it without crossing loop boundaries; the
+        # chunker (off-loop in a worker thread) observes it here. Raises
+        # JobCancelled at the next chunk boundary -> the orchestrator
+        # catches it on the awaited run_in_executor future.
+        if cancel_flag is not None and cancel_flag.is_set():
+            raise JobCancelled(job_id)
+
         chunk_audio = audio[start_sample : start_sample + window_samples]
         chunk_seconds = len(chunk_audio) / SAMPLE_RATE
         chunk_start = start_sample / SAMPLE_RATE
@@ -179,6 +229,18 @@ def transcribe_file(
         # prev_chunk_end is the chunk's absolute end (chunk_start + chunk_seconds).
         prev_chunk_end = chunk_start + chunk_seconds
         start_sample += step_samples
+
+        # D-09: emit per-chunk progress AFTER the chunk boundary closes
+        # (chunk_count was just incremented). The orchestrator marshals
+        # this onto the asyncio loop via call_soon_threadsafe.
+        if progress_cb is not None:
+            progress_cb(
+                ChunkProgress(
+                    chunks_done=chunk_count,
+                    chunks_total=total_chunks,
+                    chunk_start_s=chunk_start,
+                )
+            )
 
     _log.info(
         "STT chunker transcribed %.1f s in %d chunk(s) -> %d segment(s), language=%s",

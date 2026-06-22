@@ -32,8 +32,9 @@ strict superset — existing implementations remain valid.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Callable, Protocol
 
 from app.models.transcript import TranscriptSegment  # noqa: F401  (re-exported below)
 
@@ -74,6 +75,34 @@ class SttTranscription:
     duration: float
 
 
+@dataclass
+class ChunkProgress:
+    """Per-chunk progress emitted by the chunker's progress callback (D-09).
+
+    Phase 4 plan 04-01: the orchestrator passes a ``progress_cb`` callable
+    down through :func:`app.models.stt.chunker.transcribe_file` -> the
+    chunker calls it once per chunk boundary with the cumulative
+    ``chunks_done`` / ``chunks_total`` counts and the chunk's absolute
+    start offset. The orchestrator marshals these events onto the
+    asyncio loop via ``loop.call_soon_threadsafe`` and publishes them
+    on the :class:`~app.jobs.progress.EventBus` (D-08).
+
+    - ``chunks_done``: cumulative chunks completed so far (>=1).
+    - ``chunks_total``: total chunks the chunker will emit (precomputed
+      from the audio duration; equal to ``1`` on the fast path).
+    - ``chunk_start_s``: absolute start time of the chunk just
+      completed (seconds from the start of the source audio).
+    - ``within_chunk_percent``: optional intra-chunk percent if a future
+      backend exposes segment-level progress within a chunk (None for
+      faster-whisper, which only reports at chunk granularity).
+    """
+
+    chunks_done: int
+    chunks_total: int
+    chunk_start_s: float | None = None
+    within_chunk_percent: float | None = None
+
+
 class STTAdapter(Protocol):
     """Speech-to-text adapter interface (D-06).
 
@@ -107,6 +136,9 @@ class STTAdapter(Protocol):
         language: str | None = None,
         vad_filter: bool = True,
         condition_on_previous_text: bool = True,
+        *,
+        progress_cb: "Callable[[ChunkProgress], None] | None" = None,
+        cancel_flag: "threading.Event | None" = None,
     ) -> SttTranscription: ...
     def detect_language(self, audio: "object") -> tuple[str, float]: ...
     def decode_audio(self, path: str) -> "numpy.ndarray":
@@ -122,4 +154,4 @@ class STTAdapter(Protocol):
     def unload(self) -> None: ...
 
 
-__all__ = ["STTAdapter", "SttSegment", "SttTranscription"]
+__all__ = ["STTAdapter", "SttSegment", "SttTranscription", "ChunkProgress"]

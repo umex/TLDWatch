@@ -76,6 +76,16 @@ class Settings(BaseModel):
     concurrent_models: bool = False
     # SC-4: 85% VRAM budget gate default.
     vram_budget_fraction: float = 0.85
+    # Phase 4 D-10: worker=1 serial dispatch toggle. When True the
+    # lifespan (wired in plan 04-02) auto-starts the single in-process
+    # worker that drains the queue. Tests set it False so they can
+    # drive the worker manually and assert on synchronous state. Has a
+    # default so existing settings files without the field load cleanly
+    # (the model is extra="forbid" -- a defaulted field is the safe way
+    # to add it; the Phase 2 apply_pending / load_settings_from_disk
+    # path still round-trips because the field is always emitted on
+    # dump).
+    run_worker: bool = True
 
     @field_serializer("hf_token")
     def _serialize_hf_token(self, value: str | None) -> str | None:
