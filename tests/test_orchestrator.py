@@ -222,18 +222,27 @@ async def test_heartbeat_during_transcribing(tmp_data_dir: Path, monkeypatch: py
     # Now simulate "a long time has passed" by backdating every stage
     # file EXCEPT progress.json. Before Fix 2, ``last_stage_mtime`` did
     # not consult progress.json, so backdating manifest.json +
-    # transcript.json would make ``is_stale`` true. After Fix 2 the
-    # fresh progress.json mtime keeps the job fresh.
+    # transcript.json + source.mp4 would make ``is_stale`` true (the
+    # watchdog saw only the stale manifest mtime). After Fix 2 the
+    # fresh progress.json mtime keeps the job fresh because
+    # ``_STAGE_FILE_NAMES`` now includes ``progress.json``.
     import os
     import time
 
     fresh_mtime = time.time()
-    # Backdate the manifest + transcript to 1 hour ago.
+    # Backdate EVERY stage file except progress.json to 1 hour ago.
     old_mtime = fresh_mtime - 3600
     for name in ("manifest.json", "transcript.json"):
         p = job_dir(s, job_id) / name
         if p.exists():
             os.utime(p, (old_mtime, old_mtime))
+    # Also backdate the source file so the ONLY fresh file left is
+    # progress.json -- this isolates the Fix 2 root cause (without
+    # Fix 2, last_stage_mtime would return the old source mtime and
+    # is_stale would true-positive).
+    src_file = job_dir(s, job_id) / "source.mp4"
+    if src_file.exists():
+        os.utime(src_file, (old_mtime, old_mtime))
     # progress.json was just written by run_job -- its mtime is fresh.
     assert (job_dir(s, job_id) / "progress.json").exists()
 

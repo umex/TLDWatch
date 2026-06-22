@@ -38,11 +38,22 @@ ALLOWED_SOURCE_EXTS: frozenset[str] = frozenset(
 # ``last_stage_mtime``. Source files are matched by the ``source.*``
 # prefix (any extension - the allowlist is enforced at write time by
 # ``source_path`` / ``validate_source_ext``).
+#
+# Phase 4 plan 04-01 Fix 2 (Ollama HIGH): ``progress.json`` is included so
+# ``last_stage_mtime`` consults the progress.json mtime. Previously
+# excluded, so the stale-sweep watchdog saw only the stale ``manifest.json``
+# mtime on a long transcription and false-positive'd -- a 20-min video
+# actively transcribing for >10 min was wrongly marked stale. The
+# orchestrator's throttled progress.json rewrite (<=1/s) refreshes its
+# mtime on every chunk callback, and because it is in
+# ``_STAGE_FILE_NAMES`` the watchdog now sees the fresh mtime and leaves
+# the job alone.
 _STAGE_FILE_NAMES: tuple[str, ...] = (
     "manifest.json",
     "transcript.json",
     "diarization.json",
     "edits.json",
+    "progress.json",
 )
 _SOURCE_FILE_PREFIX = "source."
 
