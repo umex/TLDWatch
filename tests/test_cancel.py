@@ -94,7 +94,6 @@ async def test_cancel_terminal(tmp_data_dir: Path, terminal: str) -> None:
     A job in ``done`` / ``failed`` / ``cancelled`` must NOT be touched: no
     DB UPDATE, no rmtree, no signal. The function returns the unchanged row.
     """
-    pytest.xfail("Task 3: app.jobs.queue.cancel not implemented yet")
     s = _settings(tmp_data_dir)
     sf = await _session_factory(s)
     job_id = await _make_local_job(s, sf)
@@ -114,7 +113,6 @@ async def test_cancel_terminal(tmp_data_dir: Path, terminal: str) -> None:
 @pytest.mark.asyncio
 async def test_cancel_queued(tmp_data_dir: Path) -> None:
     """Cancelling a queued job -> row ``cancelled``, folder removed, row returned."""
-    pytest.xfail("Task 3: app.jobs.queue.cancel not implemented yet")
     s = _settings(tmp_data_dir)
     sf = await _session_factory(s)
     job_id = await _make_local_job(s, sf)
@@ -142,7 +140,6 @@ async def test_cancel_running(tmp_data_dir: Path) -> None:
     the 04-01 orchestrator's ``JobCancelled`` path runs ``cancel_job`` itself
     (so ``cancel`` does NOT double-call ``cancel_job``).
     """
-    pytest.xfail("Task 3: app.jobs.queue.cancel not implemented yet")
     import threading
 
     from app.jobs.orchestrator import _running

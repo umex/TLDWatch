@@ -619,11 +619,12 @@ async def test_watchdog_stale(tmp_data_dir: Path) -> None:
     """
     if not _CANCEL_AVAILABLE:
         pytest.xfail("Task 3: app.jobs.queue.run_watchdog not implemented yet")
+    _reset_work_signal()
     import asyncio
     import os
     import time
 
-    s = _settings(tmp_data_dir)
+    s = _worker_settings(tmp_data_dir)
     sf = await _sf(s)
     active_id = await _make_local_job(s, sf)
     terminal_id = await _make_local_job(s, sf)

@@ -171,3 +171,136 @@ async def run_worker(
             # the loop -- one failed job must not stall the queue.
             _log.warning("run_worker: job %s failed: %s", job_id, exc)
         # Loop: pull the next queued job.
+
+
+async def cancel(job_id: str, session, settings: Settings) -> dict:
+    """Cooperative cancel across queued / running / terminal states (D-06).
+
+    Idempotent: cancelling a terminal job (``done`` / ``failed`` /
+    ``cancelled``) is a no-op that returns the current row unchanged. The
+    ``_TERMINAL_STATUSES`` gate (T-04-04) is checked FIRST so a cancel
+    cannot race with a terminal commit and flip a done job back.
+
+    - ``queued``: ``cancel_job`` (DB-first + rmtree via cleanup) +
+      ``_work_signal.set()`` (in case the worker just pulled it; the
+      atomic claim in ``pull_next`` means if the worker already claimed
+      it the status would be ``'starting'`` not ``'queued'``, so this path
+      is safe -- the worker cannot double-run a cancelled queued job).
+    - ``starting`` / ``ingesting`` / ``transcribing``: import ``_running``
+      from :mod:`app.jobs.orchestrator`; look up the ``threading.Event``
+      cancel flag and ``.set()`` it. The 04-01 orchestrator's chunker
+      checks the flag at the next chunk boundary and raises
+      :class:`JobCancelled`; the orchestrator's ``JobCancelled`` path
+      calls ``cancel_job`` itself (DB + rmtree). This function does NOT
+      double-call ``cancel_job`` (T-04-06 -- no double-rmtree). If the
+      flag is ``None`` (race: the job just finished between the SELECT
+      and the lookup), re-SELECT; if now terminal, return the row as a
+      no-op (T-04-09).
+    """
+    from app.jobs.cleanup import _TERMINAL_STATUSES, cancel_job
+
+    result = await session.execute(
+        text("SELECT status FROM jobs WHERE id = :id"),
+        {"id": job_id},
+    )
+    row = result.fetchone()
+    if row is None:
+        return {}  # caller maps to 404
+    status = row[0]
+
+    if status in _TERMINAL_STATUSES:
+        # D-06: terminal cancel is a no-op returning the current row.
+        return {"status": status, "id": job_id}
+
+    if status == "queued":
+        # DB-first cancel (marks cancelled + rmtree) + wake the worker in
+        # case it is about to poll (the atomic claim prevents a race where
+        # the worker already claimed it -- that would have flipped status
+        # to 'starting', so this queued path is safe).
+        await cancel_job(session, settings, job_id)
+        _work_signal.set()
+        return {"status": "cancelled", "id": job_id}
+
+    # Active: starting / ingesting / transcribing.
+    # Import the 04-01 _running registry and set the cancel flag; the
+    # orchestrator's JobCancelled path does the cancel_job + rmtree (do
+    # NOT double-call cancel_job here -- T-04-06).
+    from app.jobs.orchestrator import _running
+
+    flag = _running.get(job_id)
+    if flag is not None:
+        flag.set()
+        _log.info("cancel: set cancel_flag for running job %s", job_id)
+    else:
+        # T-04-09: race -- the job just finished between the SELECT and
+        # the lookup. Re-SELECT; if now terminal, treat as no-op.
+        result = await session.execute(
+            text("SELECT status FROM jobs WHERE id = :id"),
+            {"id": job_id},
+        )
+        row = result.fetchone()
+        if row is not None and row[0] in _TERMINAL_STATUSES:
+            return {"status": row[0], "id": job_id}
+        # Still active but no flag -- the orchestrator may have just
+        # popped it from _running. Return the current row; the caller can
+        # retry if needed.
+        _log.warning(
+            "cancel: job %s is active (%s) but no _running flag found",
+            job_id,
+            row[0] if row else "missing",
+        )
+
+    # Return the current row (still active -- the orchestrator's
+    # JobCancelled path will flip it to 'cancelled' at the next chunk
+    # boundary). Re-SELECT for the freshest status.
+    result = await session.execute(
+        text("SELECT status FROM jobs WHERE id = :id"),
+        {"id": job_id},
+    )
+    row = result.fetchone()
+    if row is None:
+        return {"status": "cancelled", "id": job_id}
+    return {"status": row[0], "id": job_id}
+
+
+async def run_watchdog(
+    settings: Settings,
+    session_factory: async_sessionmaker,
+) -> None:
+    """Stale-sweep watchdog: mark stale active jobs failed every 60s (D-11).
+
+    Codex MEDIUM (T-04-07): the SELECT filters to ``status IN
+    ('ingesting','transcribing')`` ONLY -- ``queued`` jobs are NOT active
+    and are excluded (a legitimately-waiting queued job must not be
+    false-stale'd). 04-01's heartbeat (the throttled ``progress.json``
+    rewrite) keeps active transcribing jobs fresh (Fix 2), so the watchdog
+    only fires on jobs that have genuinely stalled (no mtime update for
+    >600s).
+
+    Reuses :func:`app.jobs.cleanup.is_stale` + :func:`mark_stale` (the
+    status-aware gate in ``mark_stale`` short-circuits terminal rows --
+    double safety). Guarded by ``settings.run_worker`` (tests set it
+    ``False``). Single asyncio task; cancelled on lifespan teardown
+    (Task 4).
+    """
+    if not settings.run_worker:
+        return
+    from app.jobs.cleanup import is_stale, mark_stale
+
+    _log.info("run_watchdog: starting (60s cadence, excludes queued)")
+    while True:
+        await asyncio.sleep(60)
+        try:
+            async with session_factory() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT id FROM jobs "
+                        "WHERE status IN ('ingesting','transcribing')"
+                    )
+                )
+                ids = [row[0] for row in result.fetchall()]
+                for job_id in ids:
+                    if is_stale(settings, job_id):
+                        await mark_stale(session, settings, job_id)
+        except Exception:  # pragma: no cover - defensive loop guard
+            _log.exception("run_watchdog: tick failed; continuing")
