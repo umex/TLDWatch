@@ -32,6 +32,7 @@ the lifespan runs.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -213,6 +214,49 @@ async def lifespan(app: FastAPI):
         logger.exception("startup reconciliation failed; refusing to start")
         raise
 
+    # Phase 4 plan 04-02: boot interrupted-job sweep. Runs AFTER
+    # reconcile_all (which fixes DB/source divergence) and BEFORE the
+    # worker (so the worker does not pick up jobs that should be failed).
+    # D-03: marks only ingesting/transcribing jobs failed in BOTH DB and
+    # manifest (Codex MEDIUM -- so reconcile_all on the next boot does
+    # not revert); queued jobs are NOT swept (they re-join FIFO).
+    from app.jobs.interrupt import mark_interrupted_failed
+
+    try:
+        async with session_factory() as session:
+            swept = await mark_interrupted_failed(session, settings, session_factory)
+        if swept:
+            logger.info("boot interrupted sweep: marked %d jobs failed", swept)
+    except Exception:
+        logger.exception("boot interrupted sweep failed; refusing to start")
+        raise
+
+    # Phase 4 plan 04-02: establish app.state for the 04-03 WS handler
+    # (Fix 7-partial). The bus is the shared EventBus the worker publishes
+    # to and the WS handler subscribes to; settings + session_factory are
+    # already configured via ``configure`` above but are also surfaced on
+    # app.state for direct access.
+    from app.jobs.progress import EventBus
+
+    bus = EventBus()
+    app.state.bus = bus
+    app.state.settings = settings
+    app.state.session_factory = session_factory
+
+    # Phase 4 plan 04-02: start the worker + watchdog (guarded by
+    # settings.run_worker). The worker drains the queue strictly serially
+    # (D-10); the watchdog marks stale active jobs every 60s (D-11). Both
+    # are cancelled on teardown BEFORE engine.dispose (Fix 3 graceful
+    # in-flight shutdown via 04-01's finally block).
+    worker_task = None
+    watchdog_task = None
+    if settings.run_worker:
+        from app.jobs.queue import run_worker, run_watchdog
+
+        worker_task = asyncio.create_task(run_worker(settings, session_factory, bus=bus))
+        watchdog_task = asyncio.create_task(run_watchdog(settings, session_factory))
+        logger.info("worker + watchdog started (run_worker=True)")
+
     # Announce ready to anyone watching stdout (uvicorn re-prints
     # access logs, but this is the one-line ready banner the
     # acceptance criteria check for).
@@ -221,6 +265,21 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        # Phase 4 plan 04-02: cancel worker + watchdog BEFORE engine.dispose
+        # so no DB access happens after the engine is closed. The worker
+        # task cancellation causes run_worker to exit its loop; if a run_job
+        # is in-flight, 04-01's graceful shutdown path (asyncio.wait_for(
+        # future, timeout=30.0) + cancel_flag.set()) handles the sync thread
+        # exit before model unload (Fix 3).
+        for _task in (worker_task, watchdog_task):
+            if _task is not None:
+                _task.cancel()
+        for _task in (worker_task, watchdog_task):
+            if _task is not None:
+                try:
+                    await asyncio.gather(_task, return_exceptions=True)
+                except Exception:  # pragma: no cover - defensive teardown
+                    pass
         # Phase 2 (02-02): unload every resident model before the
         # engine disposes (D-03 shutdown path). Best-effort: a failure
         # here does not block shutdown.
