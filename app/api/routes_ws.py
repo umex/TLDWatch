@@ -27,8 +27,9 @@ IMPORTANT -- do NOT duplicate 04-01's work:
 
 - 04-01's orchestrator computes ETA + publishes progress events with
   ``percent`` + ``eta_s`` (hiding ETA until ``chunks_done >= 2``).
-  04-03 RELAYS these. No ``compute_eta``, no ``eta_min_samples``, no
-  ``progress_emit_interval_ms`` here.
+  04-03 RELAYS these. No ETA computation, no ETA sample threshold, and
+  no progress-emit interval config live in this module -- 04-01 owns all
+  three.
 - 04-01's EventBus already has ``Queue(maxsize=32)`` + drop-oldest.
   04-03 does NOT re-implement backpressure.
 - 04-01 writes ``progress.json``. 04-03 READS it for the snapshot. No
