@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-04-PLAN.md (CR-03 gap closure)
-last_updated: "2026-06-23T08:27:57.481Z"
-last_activity: 2026-06-23 -- Phase 04 execution started
+stopped_at: Completed 04-05-PLAN.md (CR-01 + CR-02 gap closure)
+last_updated: "2026-06-23T09:05:00.000Z"
+last_activity: 2026-06-23 -- Phase 04 gap-closure wave 2 (04-05)
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 18
-  completed_plans: 16
-  percent: 30
+  completed_plans: 17
+  percent: 31
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 04 (job-orchestrator-persistent-queue-websocket-progress) — EXECUTING
-Plan: 2 of 6
-Status: Ready to execute
-Last activity: 2026-06-23 -- Phase 04 execution started
+Plan: 5 of 6
+Status: 04-05 complete (CR-01 + CR-02 closed); 04-06 (WR-04) next
+Last activity: 2026-06-23 -- Phase 04 gap-closure wave 2 (04-05)
 
-Progress: [███░░░░░░░] 30%
+Progress: [███░░░░░░░] 31%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Progress: [███░░░░░░░] 30%
 | Phase 04 P02 | 23m | 4 tasks | 7 files |
 | Phase 04 P03 | 67m | 3 tasks | 11 files |
 | Phase 04 P04 | 6m | 2 tasks | 2 files |
+| Phase 04 P05 | 10m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,7 @@ Recent decisions affecting current work:
 - [Phase 04]: Plan 04-01: JobCancelled in neutral app/jobs/errors.py (Fix 5); cancel_flag is threading.Event (NOT asyncio.Event); run_job re-raises non-cancel exceptions after mark_failed but swallows JobCancelled; heartbeat via progress.json mtime + _STAGE_FILE_NAMES inclusion (no os.utime on job_dir).
 - [Phase 04]: Plan 04-02: pull_next uses conditional UPDATE WHERE status='queued' + rowcount check (Fix 6 atomic claim); run_worker uses hybrid Event+poll wakeup asyncio.wait_for(_work_signal.wait(), timeout=2.0) (Fix 1); boot sweep mark_interrupted_failed writes manifest via atomic_write_json (update_stage maps 'failed'->'queued' incorrectly so the documented fallback is used); cancel running path sets _running flag only (no double cancel_job, T-04-06); watchdog excludes queued (Codex MEDIUM); 'starting' added to JobStatus Literal (transient claim state); lifespan teardown cancels worker+watchdog before engine.dispose; app.state.bus/settings/session_factory established (Fix 7-partial).
 - [Phase 04]: CR-03 closed (plan 04-04): additive resume_stage == 'done' branch in run_job advances crash-window jobs (transcript.json on disk, current_stage != 'done') to done on re-entry; happy path and no-op path unchanged; full 39-test phase suite green
+- [Phase 04]: CR-01 + CR-02 closed (plan 04-05): boot-sweep (mark_interrupted_failed) + watchdog (run_watchdog) SELECT widened to `status IN ('starting','ingesting','transcribing')` so a crashed-in-claim `starting` job is recovered on the next boot (CR-01); mark_interrupted_failed consults infer_resume_point per swept job and advances to done via update_stage('done') when resume_point is None or 'done' (transcript.json on disk, current_stage='transcribed', DB status='transcribing'), preserving the user's completed transcription (CR-02); a `starting` job is correctly FAILED (infer_resume_point returns 'ingested', not None/'done'); filter-widening approach chosen over zero-width 'starting' window to avoid changing 04-01's orchestrator wiring; full 41-test phase suite green (39 prior + 2 new)
 
 ### Pending Todos
 
@@ -118,8 +120,8 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-23T08:27:57.473Z
-Stopped at: Completed 04-04-PLAN.md (CR-03 gap closure)
+Last session: 2026-06-23T09:05:00.000Z
+Stopped at: Completed 04-05-PLAN.md (CR-01 + CR-02 gap closure)
 Resume file: None
 
 ### Gap-closure wave (01-04) — closed

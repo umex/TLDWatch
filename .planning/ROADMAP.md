@@ -10,7 +10,7 @@ A local-first web app that turns any video (local file, YouTube URL, or YouTube 
 - [x] **Phase 2: GPU Backend Detection + Model Manager** - First-run CUDA/ROCm/CPU detection, model download with SHA verification, lazy load + idle unload, single-model VRAM discipline. (all plans complete; verification pending) (completed 2026-06-19)
 
 - [x] **Phase 3: STT Adapter + Audio Chunker + Standalone CLI** - faster-whisper adapter, long-audio chunker with OOM fallback, language auto-detect, a runnable CLI that proves the GPU abstraction end-to-end. (3/3 plans complete; verified 11/11 + UAT passed + threat-secure 9/9 — laptop CUDA SC-5 closed 2026-06-22) (completed 2026-06-22)
-- [x] **Phase 4: Job Orchestrator + Persistent Queue + WebSocket Progress** - In-process job runner, SQLite-backed queue with restart persistence, state machine with file-as-truth, real-time progress broadcast. (3/3 plans complete; verification pending)
+- [x] **Phase 4: Job Orchestrator + Persistent Queue + WebSocket Progress** - In-process job runner, SQLite-backed queue with restart persistence, state machine with file-as-truth, real-time progress broadcast. (5/6 plans complete — 3 original + 2 gap-closure; WR-04 gap-closure remaining)
 - [ ] **Phase 5: Local File Ingest + History UI + 3-Pane Layout** - Streaming drag-and-drop upload, history list (left pane), transcript view (middle), summary view (right), active-line highlight, no embedded video.
 - [ ] **Phase 6: YouTube Ingest + Sequential Playlist Queue** - yt-dlp audio download, single-URL submit, playlist fan-out with pause/resume, timestamp link-out to YouTube.
 - [ ] **Phase 7: Diarization Adapter + Speaker Rename Cluster** - pyannote adapter (optional, HF-token-gated), default Person N labels, bulk-rename via chips, per-line reassign, find-and-replace speaker.
@@ -137,6 +137,12 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 04-03: WebSocket progress pub/sub + idempotent submit
+
+**Wave 4** *(gap-closure; close CR-01 / CR-02 / CR-03 / WR-04 from 04-VERIFICATION.md)*
+
+- [x] 04-04: CR-03 — run_job resume_stage == "done" advance (crash between update_stage("transcribed") and update_stage("done"))
+- [x] 04-05: CR-01 + CR-02 — boot-sweep + watchdog SELECT widened to include "starting"; infer_resume_point consultation advances file-complete jobs to done (crash after transcribed, before done)
+- [ ] 04-06: WR-04 — wire cooperative queue.cancel to POST /jobs/{id}/cancel API route
 
 ### Phase 5: Local File Ingest + History UI + 3-Pane Layout
 
@@ -280,7 +286,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 1. Back-end Skeleton + Storage + Data Layout | 3/3 | Complete   | 2026-06-14 |
 | 2. GPU Backend Detection + Model Manager | 5/5 | Complete    | 2026-06-19 |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 3/3 | Complete    | 2026-06-22 |
-| 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 4/6 | In Progress|  |
+| 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 5/6 | In Progress|  |
 | 5. Local File Ingest + History UI + 3-Pane Layout | 0/3 | Not started | - |
 | 6. YouTube Ingest + Sequential Playlist Queue | 0/3 | Not started | - |
 | 7. Diarization Adapter + Speaker Rename Cluster | 0/3 | Not started | - |
