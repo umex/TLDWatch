@@ -307,3 +307,116 @@ async def test_cancel_terminal_via_api_idempotent(
 
     # Terminal no-op does not rmtree the folder.
     assert job_dir(s, job_id).exists()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 plan 04-REVIEW -- WR-01 gap-closure regression test (TDD RED-first).
+#
+# ``test_cancel_queued_race_routes_to_active`` simulates the worker's
+# ``pull_next`` atomic claim committing between ``queue.cancel``'s initial
+# SELECT (sees ``'queued'``) and the queued branch's status flip. Before
+# the fix the queued branch ran an UNCONDITIONAL ``UPDATE jobs SET
+# status='cancelled' WHERE id=:id`` which flipped the now-``'starting'``
+# row to ``'cancelled'`` out from under the running orchestrator; the
+# orchestrator's next ``update_stage`` then overwrote it, silently losing
+# the cancel. After the fix the queued branch uses a conditional
+# ``WHERE status='queued'`` UPDATE; on ``rowcount == 0`` it falls through
+# to the active-cancel path which sets the ``_running`` threading.Event so
+# the orchestrator's chunker raises ``JobCancelled`` at the next chunk
+# boundary (D-06 cooperative cancel).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancel_queued_race_routes_to_active(tmp_data_dir: Path) -> None:
+    """WR-01: a queued cancel that loses the claim race routes to the active path.
+
+    Simulates the worker's ``pull_next`` atomic claim committing between
+    ``queue.cancel``'s initial SELECT (sees ``'queued'``) and the queued
+    branch's status flip. After the fix the queued branch's conditional
+    ``WHERE status='queued'`` UPDATE gets ``rowcount == 0`` (the row is
+    now ``'starting'``), and ``queue.cancel`` falls through to the
+    active-cancel path: it sets the ``_running`` threading.Event so the
+    orchestrator's chunker raises ``JobCancelled`` at the next chunk
+    boundary (D-06). The row is NOT flipped to ``'cancelled'`` out from
+    under the running worker, and the folder is NOT rmtree'd (the
+    orchestrator's ``JobCancelled`` path owns the rmtree).
+    """
+    import threading
+
+    from sqlalchemy import text
+    from app.jobs.orchestrator import _running
+    from app.jobs.queue import cancel as queue_cancel
+
+    s = _settings(tmp_data_dir)
+    sf = await _session_factory(s)
+    job_id = await _make_local_job(s, sf)
+    # Status is ``queued`` from create_job; folder exists.
+    assert job_dir(s, job_id).exists()
+
+    # Register a cancel flag as if run_job were in-flight (mirrors what
+    # happens right after pull_next claims the row and run_job registers
+    # its cancel flag).
+    flag = threading.Event()
+    _running[job_id] = flag
+
+    try:
+        async with sf() as cancel_session:
+            real_execute = cancel_session.execute
+            flipped = {"done": False}
+
+            async def _wrapped_execute(statement, *args, **kwargs):
+                stmt_str = str(statement)
+                # Intercept the queued branch's conditional UPDATE (the
+                # fix adds ``AND status = 'queued'``) and flip the row to
+                # ``'starting'`` FIRST, simulating the worker's atomic
+                # claim winning the race between the initial SELECT and
+                # this UPDATE. Before the fix the queued branch ran an
+                # UNCONDITIONAL UPDATE (no ``status = 'queued'`` clause),
+                # so this trigger never fires and the test fails RED
+                # (the unconditional UPDATE flips the row to 'cancelled'
+                # and rmtree's the folder).
+                if (
+                    not flipped["done"]
+                    and "UPDATE" in stmt_str
+                    and "status = 'queued'" in stmt_str
+                ):
+                    async with sf() as worker_session:
+                        await worker_session.execute(
+                            text(
+                                "UPDATE jobs SET status = 'starting' "
+                                "WHERE id = :id"
+                            ),
+                            {"id": job_id},
+                        )
+                        await worker_session.commit()
+                    flipped["done"] = True
+                return await real_execute(statement, *args, **kwargs)
+
+            cancel_session.execute = _wrapped_execute  # type: ignore[assignment]
+
+            row = await queue_cancel(job_id, cancel_session, s)
+
+        # The active-cancel path set the cancel flag (the chunker would
+        # observe it at the next chunk boundary and raise JobCancelled).
+        assert flag.is_set(), (
+            "WR-01: cancel on a queued job that was claimed mid-cancel must "
+            "route to the active path and set the _running cancel flag"
+        )
+        # The row was NOT flipped to 'cancelled' out from under the worker
+        # -- it is still in an active state ('starting' here). The
+        # orchestrator's JobCancelled path will flip it to 'cancelled' at
+        # the next chunk boundary.
+        assert row is not None
+        assert row["status"] != "cancelled", (
+            f"WR-01: cancel must NOT flip a claimed row to 'cancelled' out "
+            f"from under the running worker; got status={row['status']!r}"
+        )
+        # The folder is NOT rmtree'd by the queued branch (the active
+        # path leaves it for the orchestrator's JobCancelled path).
+        assert job_dir(s, job_id).exists(), (
+            "WR-01: the queued branch must not rmtree a claimed row's "
+            "folder; the orchestrator's JobCancelled path owns the rmtree"
+        )
+    finally:
+        _running.pop(job_id, None)
