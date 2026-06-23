@@ -142,7 +142,7 @@ Plans:
 
 - [x] 04-04: CR-03 — run_job resume_stage == "done" advance (crash between update_stage("transcribed") and update_stage("done"))
 - [x] 04-05: CR-01 + CR-02 — boot-sweep + watchdog SELECT widened to include "starting"; infer_resume_point consultation advances file-complete jobs to done (crash after transcribed, before done)
-- [ ] 04-06: WR-04 — wire cooperative queue.cancel to POST /jobs/{id}/cancel API route
+- [x] 04-06: WR-04 — wire cooperative queue.cancel to POST /jobs/{id}/cancel API route
 
 ### Phase 5: Local File Ingest + History UI + 3-Pane Layout
 
@@ -286,7 +286,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 1. Back-end Skeleton + Storage + Data Layout | 3/3 | Complete   | 2026-06-14 |
 | 2. GPU Backend Detection + Model Manager | 5/5 | Complete    | 2026-06-19 |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 3/3 | Complete    | 2026-06-22 |
-| 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 5/6 | In Progress|  |
+| 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 6/6 | Complete   | 2026-06-23 |
 | 5. Local File Ingest + History UI + 3-Pane Layout | 0/3 | Not started | - |
 | 6. YouTube Ingest + Sequential Playlist Queue | 0/3 | Not started | - |
 | 7. Diarization Adapter + Speaker Rename Cluster | 0/3 | Not started | - |
