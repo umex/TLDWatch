@@ -158,13 +158,18 @@ Plans:
   4. The currently active transcript line is highlighted based on scroll position so the user can locate context.
   5. The user can re-open a completed job, see its existing transcript, and re-export it.
 
-**Plans**: TBD
+**Plans**: 3 plans (2 Wave-1 parallel + 1 Wave-2 integration)
 
 Plans:
 
-- [ ] 05-01: Streaming upload endpoint + back-end ingest stage
-- [ ] 05-02: React app shell + 3-pane layout + drop zone
-- [ ] 05-03: History list + job detail view + active-line highlight
+**Wave 1** (back-end upload + FE shell run in parallel; zero file overlap)
+
+- [ ] 05-01-PLAN.md — Streaming upload endpoint (POST /jobs/upload) + transcript read endpoint (GET /jobs/{id}/transcript) + pre-queued 'uploading' status race-fix (autonomous; INGEST-01, JOB-03)
+- [ ] 05-02-PLAN.md — Greenfield React app scaffold + routes + 2-pane detail + drop zone + active-job cards (autonomous; INGEST-01, UI-01, UI-02)
+
+**Wave 2** (blocked on Wave 1 completion)
+
+- [ ] 05-03-PLAN.md — Scroll-spy active-line highlight + history terminal-transition refetch + re-open-loads-transcript + full end-to-end suite (autonomous; UI-03, JOB-03, UI-01)
 
 ### Phase 6: YouTube Ingest + Sequential Playlist Queue
 
