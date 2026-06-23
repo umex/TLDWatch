@@ -764,3 +764,118 @@ async def test_hybrid_wakeup_no_signal(tmp_data_dir: Path) -> None:
             await asyncio.gather(task, return_exceptions=True)
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 plan 04-04 -- CR-03 gap-closure regression test (TDD RED-first).
+#
+# ``test_resume_advances_to_done_when_both_stages_complete`` simulates the
+# crash window between ``update_stage("transcribed")`` and
+# ``update_stage("done")``: transcript.json is on disk (file-as-truth says
+# transcribed is complete) AND manifest.current_stage == "transcribed", but
+# the derived done transition was never recorded (DB status stays
+# "transcribing"). Without the 04-04 fix run_job falls through both
+# ``if not skip_*`` blocks and exits without advancing -- the job stuck in
+# "transcribing" forever. The fix adds a final ``if resume_stage == "done":``
+# branch that records the derived done transition + publishes the done event.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resume_advances_to_done_when_both_stages_complete(
+    tmp_data_dir: Path,
+) -> None:
+    """CR-03: a crash-window job (both stages file-complete, current_stage !=
+    "done") advances to done when run_job re-enters (no re-transcription).
+
+    Simulates the crash between ``update_stage("transcribed")`` and
+    ``update_stage("done")``: pre-write a valid transcript.json, force
+    manifest.current_stage="transcribed" + DB status="transcribing" (the
+    post-crash state), then call run_job. The resume walker returns
+    ``"done"`` (ingested + transcribed are file-complete but
+    is_stage_complete("done") is False because current_stage != "done").
+    Before the 04-04 fix run_job ignored that verdict, fell through both
+    ``if not skip_*`` blocks, and exited without advancing. After the fix
+    the new ``if resume_stage == "done":`` branch records the derived done
+    transition and publishes the done event.
+    """
+    s = _settings(tmp_data_dir)
+    sf = await _session_factory(s)
+
+    # 1. Create a local-source job (D-04 reference-in-place -- the source
+    #    file already exists so is_stage_complete("ingested") is True).
+    job_id = await _make_local_job(s, sf)
+
+    # 2. Pre-write a valid transcript.json (file-as-truth says transcribed
+    #    is complete) and force manifest.current_stage="transcribed" +
+    #    DB status="transcribing" -- the post-crash state where
+    #    update_stage("transcribed") committed but the subsequent
+    #    update_stage("done") did not.
+    from app.models.transcript import Transcript, TranscriptSegment
+    from app.storage.atomic import atomic_write_json
+
+    transcript = Transcript(
+        job_id=job_id,
+        language="en",
+        segments=[TranscriptSegment(start_s=0.0, end_s=1.0, text="hi")],
+    )
+    await atomic_write_json(
+        transcript_path(s, job_id), transcript.model_dump(mode="json")
+    )
+
+    m = await read_manifest(s, job_id)
+    m = m.model_copy(update={"current_stage": "transcribed"})
+    await write_manifest(s, m)
+
+    from sqlalchemy import text
+
+    async with sf() as session:
+        await session.execute(
+            text("UPDATE jobs SET status = :s WHERE id = :id"),
+            {"s": "transcribing", "id": job_id},
+        )
+        await session.commit()
+
+    # Sanity: the resume walker returns "done" in this crash window.
+    manifest_before = await read_manifest(s, job_id)
+    assert infer_resume_point(s, job_id, manifest_before) == "done"
+
+    # 3. Subscribe a recording queue so we can assert the done event was
+    #    published to the bus.
+    bus = EventBus()
+    q = bus.subscribe(job_id)
+
+    # 4. Wire a FakeAdapter and assert it was NOT called (skip_transcribed
+    #    is True -- the transcript is already on disk, no re-transcription).
+    fake = FakeAdapter()
+
+    # 5. Re-enter run_job -- the 04-04 fix advances the job to done.
+    await run_job(s, sf, job_id, bus=bus, adapter=fake)
+
+    # 6. Assertions:
+    # (a) manifest.current_stage == "done" (the derived done transition
+    #     was recorded by the new resume_stage == "done" branch).
+    m_after = await read_manifest(s, job_id)
+    assert m_after.current_stage == "done"
+    # (b) DB status == "done".
+    async with sf() as session:
+        row = await get_job(session, job_id)
+    assert row is not None
+    assert row.status == "done"
+    # (c) The bus received {"type": "done"} (same event the happy path
+    #     publishes at orchestrator.py:282).
+    events: list[dict] = []
+    while True:
+        try:
+            events.append(q.get_nowait())
+        except asyncio.QueueEmpty:
+            break
+    assert any(ev.get("type") == "done" for ev in events), (
+        f"expected a 'done' event on the bus, got: {events}"
+    )
+    # (d) The FakeAdapter.transcribe was NOT called (skip_transcribed=True
+    #     -- the transcript is already on disk, no re-transcription).
+    assert fake.call_count == 0, (
+        "FakeAdapter.transcribe should not be called when transcript.json "
+        "already exists (skip_transcribed=True)"
+    )
