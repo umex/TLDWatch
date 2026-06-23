@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Completed 04-05-PLAN.md (CR-01 + CR-02 gap closure)
-last_updated: "2026-06-23T08:54:51.578Z"
+status: ready_to_plan
+stopped_at: Phase 04 complete (6/6 plans, all gap-closures verified), ready to plan Phase 5
+last_updated: "2026-06-23"
 last_activity: 2026-06-23
 progress:
   total_phases: 10
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** The user can drop in any video and get back a clean, speaker-aware transcript plus summaries shaped for the content type — without it ever leaving the machine.
-**Current focus:** Phase 04 — job-orchestrator-persistent-queue-websocket-progress
+**Current focus:** Phase 5 — local-file-ingest-+-history-ui-+-3-pane-layout
 
 ## Current Position
 
 Phase: 5
 Plan: Not started
-Status: 04-05 complete (CR-01 + CR-02 closed); 04-06 (WR-04) next
+Status: Phase 04 complete (6/6 plans, all gap-closures verified — CR-01/02/03 + WR-04 closed, WR-01/WR-02 race warnings fixed); ready to plan Phase 5
 Last activity: 2026-06-23
 
-Progress: [███░░░░░░░] 31%
+Progress: [████████████████████] 18/18 plans (100% of milestone plans so far) — 4/10 phases complete
 
 ## Performance Metrics
 

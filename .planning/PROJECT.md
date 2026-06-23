@@ -15,6 +15,10 @@ The user can drop in any video and get back a clean, speaker-aware transcript pl
 - ✓ App produces a transcript with timestamps for the entire video — Phase 3 (TRANS-01)
 - ✓ App handles long videos by chunking audio automatically, with fallback when a single-shot job would OOM — Phase 3 (INGEST-05)
 - ✓ App auto-detects the spoken language from the audio — Phase 3 (INGEST-06)
+- ✓ Jobs run in the background — user can navigate away and return to status — Phase 4 (JOB-02)
+- ✓ Job queue state persists across app restarts; queued/in-flight jobs resume — Phase 4 (JOB-04)
+- ✓ User can cancel a queued or running job (cooperative, non-destructive) — Phase 4 (JOB-05)
+- ✓ User sees per-job progress (current stage, percent, ETA) in real time over WebSocket — Phase 4 (JOB-06)
 
 ### Active
 
@@ -39,7 +43,6 @@ The user can drop in any video and get back a clean, speaker-aware transcript pl
 - [ ] Front-end (React) and back-end (Python) are separated and communicate via a job API
 - [ ] Transcription, diarization, and LLM summarization all run on local models on the user's GPU
 - [ ] App downloads its own models on first run; user can swap model variants in settings
-- [ ] Jobs run in the background — user can navigate away and return to status
 - [ ] App auto-detects GPU (NVIDIA CUDA vs AMD ROCm) on first run and configures backends silently
 - [ ] User can configure a "quality preset" (e.g. small / balanced / large) in settings; the app picks compatible model variants automatically
 - [ ] User can override the model selection per category (transcription / diarization / LLM) from a settings panel
@@ -112,4 +115,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-22 after Phase 3*
+*Last updated: 2026-06-23 after Phase 4*
