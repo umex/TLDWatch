@@ -47,6 +47,8 @@ from app.api.routes_health import router as health_router
 from app.api.routes_jobs import router as jobs_router
 from app.api.routes_models import router as models_router
 from app.api.routes_settings import router as settings_router
+from app.api.routes_ws import router as ws_router
+from app.api.routes_ws import SubscriberRegistry
 from app.models import (
     BackendProbe,
     GpuBurnResult,
@@ -242,6 +244,12 @@ async def lifespan(app: FastAPI):
     app.state.bus = bus
     app.state.settings = settings
     app.state.session_factory = session_factory
+    # Phase 4 plan 04-03 (Codex MEDIUM): the SubscriberRegistry is a class
+    # on app.state (NOT a module-level dict) so tests and app instances
+    # are isolated. The WS handler reads ``websocket.app.state.subscribers``
+    # and caps per-job subscribers at ``settings.ws_subscriber_cap``
+    # (T-04-02 DoS guard).
+    app.state.subscribers = SubscriberRegistry()
 
     # Phase 4 plan 04-02: start the worker + watchdog (guarded by
     # settings.run_worker). The worker drains the queue strictly serially
@@ -250,12 +258,38 @@ async def lifespan(app: FastAPI):
     # in-flight shutdown via 04-01's finally block).
     worker_task = None
     watchdog_task = None
+    janitor_task = None
     if settings.run_worker:
         from app.jobs.queue import run_worker, run_watchdog
 
         worker_task = asyncio.create_task(run_worker(settings, session_factory, bus=bus))
         watchdog_task = asyncio.create_task(run_watchdog(settings, session_factory))
         logger.info("worker + watchdog started (run_worker=True)")
+
+        # Phase 4 plan 04-03 (Codex LOW): idempotency-key janitor -- a
+        # periodic task that DELETEs expired idempotency_keys rows so the
+        # table does not grow unboundedly. The loop sleeps for
+        # ``idempotency_ttl_hours`` (rounded to a 1h minimum cadence) and
+        # calls ``run_janitor``; cancelled on teardown alongside the
+        # worker + watchdog. Imported lazily so the module is only loaded
+        # when the janitor is actually started.
+        from app.api.idempotency import run_janitor
+
+        async def _janitor_loop():
+            # Cadence: 1h. The TTL itself is the expiry horizon, not the
+            # cadence -- running every hour keeps the table from growing
+            # more than ~1h of expired rows at a time.
+            while True:
+                try:
+                    await asyncio.sleep(3600)
+                    await run_janitor(session_factory, settings)
+                except asyncio.CancelledError:
+                    break
+                except Exception:  # pragma: no cover - defensive logging
+                    logger.exception("idempotency janitor iteration failed")
+
+        janitor_task = asyncio.create_task(_janitor_loop())
+        logger.info("idempotency janitor started (TTL=%dh)", settings.idempotency_ttl_hours)
 
     # Announce ready to anyone watching stdout (uvicorn re-prints
     # access logs, but this is the one-line ready banner the
@@ -271,10 +305,10 @@ async def lifespan(app: FastAPI):
         # is in-flight, 04-01's graceful shutdown path (asyncio.wait_for(
         # future, timeout=30.0) + cancel_flag.set()) handles the sync thread
         # exit before model unload (Fix 3).
-        for _task in (worker_task, watchdog_task):
+        for _task in (worker_task, watchdog_task, janitor_task):
             if _task is not None:
                 _task.cancel()
-        for _task in (worker_task, watchdog_task):
+        for _task in (worker_task, watchdog_task, janitor_task):
             if _task is not None:
                 try:
                     await asyncio.gather(_task, return_exceptions=True)
@@ -391,3 +425,5 @@ app.include_router(jobs_router)
 app.include_router(settings_router)
 app.include_router(diagnostics_router)
 app.include_router(models_router)
+# Phase 4 plan 04-03: WebSocket progress endpoint (D-08 per-job).
+app.include_router(ws_router)

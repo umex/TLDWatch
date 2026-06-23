@@ -86,6 +86,19 @@ class Settings(BaseModel):
     # path still round-trips because the field is always emitted on
     # dump).
     run_worker: bool = True
+    # Phase 4 plan 04-03 (T-04-02 DoS guard): cap on concurrent WS
+    # subscribers per job_id. The SubscriberRegistry on app.state
+    # rejects extra subscribers with an error close (1008) so a single
+    # job_id cannot accumulate unbounded WS connections. Defaulted so
+    # existing settings files without the field load cleanly under
+    # extra="forbid".
+    ws_subscriber_cap: int = 16
+    # Phase 4 plan 04-03 (Codex LOW): idempotency-key TTL in hours.
+    # The janitor task (started in lifespan guarded by run_worker)
+    # periodically DELETEs idempotency_keys rows older than this. 24h
+    # matches the common "retry within a day" pattern; clients that
+    # need longer-lived idempotency can raise this.
+    idempotency_ttl_hours: int = 24
 
     @field_serializer("hf_token")
     def _serialize_hf_token(self, value: str | None) -> str | None:

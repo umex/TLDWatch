@@ -39,8 +39,25 @@ def ws_client(tmp_data_dir: Path) -> "object":  # noqa: ANN202
 
     from app.main import app
 
-    with TestClient(app) as client:
+    # base_url=http://localhost so HTTP POST /jobs passes the
+    # TrustedHostMiddleware (allow-list of localhost / 127.0.0.1 /
+    # 0.0.0.0). The Starlette TestClient's websocket_connect does NOT
+    # carry base_url's host into the WS handshake Host header (it sends
+    # "testserver"), so the WS tests pass an explicit host header via
+    # the ``_ws`` helper below.
+    with TestClient(app, base_url="http://localhost") as client:
         yield client
+
+
+def _ws(ws_client: "object", url: str) -> "object":
+    """Wrap ``websocket_connect`` with a localhost Host header.
+
+    The TrustedHostMiddleware rejects the TestClient's default
+    "testserver" Host on the WS handshake; passing the header explicitly
+    makes the middleware accept the upgrade. HTTP requests already use
+    base_url=http://localhost so they do not need this.
+    """
+    return ws_client.websocket_connect(url, headers={"host": "localhost"})
 
 
 # --- Helpers ----------------------------------------------------------------
@@ -87,7 +104,7 @@ def test_snapshot_on_connect(ws_client: "object") -> None:
             "updated_at": "2026-06-22T00:00:00",
         },
     )
-    with ws_client.websocket_connect(f"/ws/jobs/{job_id}/events") as ws:
+    with _ws(ws_client, f"/ws/jobs/{job_id}/events") as ws:
         msg = ws.receive_json()
     assert msg["type"] == "snapshot"
     assert msg["job_id"] == job_id
@@ -100,7 +117,7 @@ def test_snapshot_on_connect(ws_client: "object") -> None:
 def test_snapshot_queued_job_no_progress_json(ws_client: "object") -> None:
     """A queued job with no progress.json yields a snapshot with percent=0, eta=None."""
     job_id = _make_job(ws_client)
-    with ws_client.websocket_connect(f"/ws/jobs/{job_id}/events") as ws:
+    with _ws(ws_client, f"/ws/jobs/{job_id}/events") as ws:
         msg = ws.receive_json()
     assert msg["type"] == "snapshot"
     assert msg["job_id"] == job_id
@@ -113,7 +130,7 @@ def test_live_progress_events(ws_client: "object") -> None:
     from app.main import app
 
     job_id = _make_job(ws_client)
-    with ws_client.websocket_connect(f"/ws/jobs/{job_id}/events") as ws:
+    with _ws(ws_client, f"/ws/jobs/{job_id}/events") as ws:
         # Consume the snapshot first (always sent on connect).
         snap = ws.receive_json()
         assert snap["type"] == "snapshot"
@@ -142,7 +159,7 @@ def test_done_event_relay(ws_client: "object") -> None:
     from app.main import app
 
     job_id = _make_job(ws_client)
-    with ws_client.websocket_connect(f"/ws/jobs/{job_id}/events") as ws:
+    with _ws(ws_client, f"/ws/jobs/{job_id}/events") as ws:
         ws.receive_json()  # snapshot
         app.state.bus.publish(job_id, {"type": "done"})
         msg = ws.receive_json()
@@ -156,12 +173,12 @@ def test_subscriber_cap(ws_client: "object") -> None:
     app.state.settings.ws_subscriber_cap = 2
     try:
         job_id = _make_job(ws_client)
-        with ws_client.websocket_connect(f"/ws/jobs/{job_id}/events") as ws1:
+        with _ws(ws_client, f"/ws/jobs/{job_id}/events") as ws1:
             assert ws1.receive_json()["type"] == "snapshot"
-            with ws_client.websocket_connect(f"/ws/jobs/{job_id}/events") as ws2:
+            with _ws(ws_client, f"/ws/jobs/{job_id}/events") as ws2:
                 assert ws2.receive_json()["type"] == "snapshot"
                 # 3rd subscriber: rejected with an error message.
-                with ws_client.websocket_connect(
+                with _ws(ws_client, 
                     f"/ws/jobs/{job_id}/events"
                 ) as ws3:
                     msg = ws3.receive_json()
@@ -176,7 +193,7 @@ def test_disconnect_removes_subscriber(ws_client: "object") -> None:
     from app.main import app
 
     job_id = _make_job(ws_client)
-    with ws_client.websocket_connect(f"/ws/jobs/{job_id}/events") as ws:
+    with _ws(ws_client, f"/ws/jobs/{job_id}/events") as ws:
         ws.receive_json()  # snapshot
     # The finally block in the WS handler removes the subscriber on close.
     assert app.state.subscribers.count(job_id) == 0
@@ -192,7 +209,7 @@ def test_eta_null_below_threshold(ws_client: "object") -> None:
     from app.main import app
 
     job_id = _make_job(ws_client)
-    with ws_client.websocket_connect(f"/ws/jobs/{job_id}/events") as ws:
+    with _ws(ws_client, f"/ws/jobs/{job_id}/events") as ws:
         ws.receive_json()  # snapshot
         app.state.bus.publish(
             job_id,
@@ -213,7 +230,7 @@ def test_eta_null_below_threshold(ws_client: "object") -> None:
 
 def test_snapshot_not_found(ws_client: "object") -> None:
     """A WS connect to a non-existent job sends an error and closes (1008)."""
-    with ws_client.websocket_connect(
+    with _ws(ws_client, 
         "/ws/jobs/00000000-0000-0000-0000-000000000000/events"
     ) as ws:
         msg = ws.receive_json()
