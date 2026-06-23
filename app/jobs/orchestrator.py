@@ -291,6 +291,17 @@ async def run_job(
             # "transcribing" forever. Advance the derived done transition
             # here and publish the done event (same event the happy path
             # publishes at line 282).
+            #
+            # WR-02: a cancel routed against a job in this resume window
+            # (transcript.json on disk, current_stage='transcribed', DB
+            # still 'transcribing') sets the flag via queue.cancel, but no
+            # chunker is running (skip_transcribed is True) so no
+            # JobCancelled is raised by the transcribe block. Check the
+            # flag here and route to the existing JobCancelled except-handler
+            # so the cooperative-cancel contract (D-06) is honored -- the
+            # user's cancel must result in 'cancelled', not 'done'.
+            if cancel_flag.is_set():
+                raise JobCancelled(job_id)
             async with session_factory() as session:
                 await update_stage(settings, session, job_id, "done")
             _publish({"type": "done"})
