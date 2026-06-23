@@ -2,245 +2,253 @@
 phase: 04-job-orchestrator-persistent-queue-websocket-progress
 reviewed: 2026-06-23T00:00:00Z
 depth: standard
-files_reviewed: 18
+files_reviewed: 4
 files_reviewed_list:
-  - app/api/idempotency.py
-  - app/api/routes_jobs.py
-  - app/api/routes_ws.py
-  - app/jobs/errors.py
-  - app/jobs/interrupt.py
   - app/jobs/orchestrator.py
-  - app/jobs/progress.py
+  - app/jobs/interrupt.py
   - app/jobs/queue.py
-  - app/jobs/resume.py
-  - app/jobs/service.py
-  - app/main.py
-  - app/models/job.py
-  - app/models/settings.py
-  - app/models/stt/adapter.py
-  - app/models/stt/chunker.py
-  - app/models/stt/protocol.py
-  - app/storage/fs.py
-  - migrations/0008_idempotency_keys.sql
+  - app/api/routes_jobs.py
 findings:
-  critical: 3
-  warning: 4
-  info: 5
-  total: 12
+  critical: 0
+  warning: 2
+  info: 6
+  total: 8
 status: issues_found
 ---
 
 # Phase 04: Code Review Report
 
-**Reviewed:** 2026-06-23T00:00:00Z
+**Reviewed:** 2026-06-23
 **Depth:** standard
-**Files Reviewed:** 18
+**Files Reviewed:** 4
 **Status:** issues_found
 
 ## Summary
 
-Phase 04 delivers the job orchestrator state machine, persistent SQLite queue, boot sweep, cooperative cancel, watchdog, WebSocket progress endpoint, and idempotent job submission. The architecture is generally sound and the cross-AI review concerns (Fix 1-9) were largely addressed: `functools.partial` for executor kwargs, `threading.Event` for cross-loop cancel, `progress.json` in `_STAGE_FILE_NAMES` for heartbeat, horizontal `JobCancelled` import, atomic `pull_next` claim, hybrid Event+poll wakeup, key-first idempotency reservation, `idempotency_key` column name, and `app.state` accessors.
+Re-reviewed the four gap-closure files for phase 04: the CR-03 resume dead-end fix
+in `orchestrator.py` (the new `if resume_stage == "done"` advance branch), the
+CR-01/CR-02 widened SELECT filters + `infer_resume_point` advance branch in
+`interrupt.py` and `queue.py`, and the WR-04 post_cancel rewiring to
+`queue.cancel` in `routes_jobs.py`. The core logic is sound: the CR-03 advance
+correctly handles the crash window between `update_stage("transcribed")` and
+`update_stage("done")`, the CR-02 sweep correctly advances file-complete jobs
+instead of failing them, and the cancel rewiring delegates to the cooperative
+path as designed.
 
-However, three BLOCKER-class correctness gaps remain in the restart-resume lifecycle. The boot sweep (`mark_interrupted_failed`) and watchdog select only `status IN ('ingesting','transcribing')` and never check whether the job's stages are actually complete -- a job that crashed after `update_stage("transcribed")` but before `update_stage("done")` has a complete `transcript.json` on disk yet gets marked `failed` on the next boot. Jobs that crash during the transient `starting` status (between `pull_next` and the first `update_stage`) are never swept at all and become permanently stuck with no recovery path. And `run_job` itself cannot advance a job to `done` on resume -- if both `skip_ingested` and `skip_transcribed` are True but `current_stage != "done"`, the orchestrator returns without calling `update_stage("done")`, leaving the job in `transcribing` status indefinitely.
+Two real correctness gaps survived the closure:
 
-The WebSocket endpoint has a snapshot-to-subscribe race (terminal events published between snapshot read and `bus.subscribe` are lost, leaving clients stuck) and a subscriber-registry leak (the snapshot send is outside the `try/finally` that cleans up the registry). The `progress.json` `updated_at` field uses naive local time instead of UTC, inconsistent with the rest of the app. The new cooperative `queue.cancel` is implemented and tested but not wired to any API route -- the existing cancel route rmtrees the folder out from under a running orchestrator instead of setting the cancel flag.
+1. **WR-01** — `cancel_job`'s DB UPDATE has no status guard. The queued-cancel
+   path in `queue.cancel` races with the worker's atomic claim: if
+   `pull_next` flips a queued row to `'starting'` between the cancel route's
+   SELECT and `cancel_job`'s unconditional UPDATE, the cancel silently flips a
+   running job to `'cancelled'`, which the orchestrator then overwrites on its
+   next `update_stage` call. The user's cancel is lost and the job runs to
+   completion. The docstring at `queue.py:185-188` claims the path is safe
+   because the atomic claim "prevents double-run" — true, but it does NOT
+   prevent the cancel-loss direction of the race.
+2. **WR-02** — the CR-03 advance branch in `orchestrator.py` (lines 284-297)
+   never checks `cancel_flag.is_set()`. If a user cancels a job that is in the
+   CR-03 resume window (transcript.json on disk, `current_stage='transcribed'`,
+   DB status still `'transcribing'`), the orchestrator advances the job to
+   `'done'` anyway, dropping the cancel intent on the floor.
+
+The remaining findings are quality / robustness nits (redundant exception
+tuple, redundant final commit, wasted re-query in the cancel route, narrow
+manifest-delete race in the sweep, `_running` overwrite on double-run).
 
 ## Critical Issues
 
-### CR-01: Jobs stuck in "starting" status are never recovered
-
-**File:** `app/jobs/interrupt.py:78-82`, `app/jobs/queue.py:295-300`
-**Issue:** Both `mark_interrupted_failed` (boot sweep) and `run_watchdog` select `status IN ('ingesting','transcribing')` only. The transient `starting` status (set by `pull_next`'s atomic claim, between `UPDATE ... status='starting'` and the first `update_stage("ingested")`) is NOT included. If the process is killed during that window (read_manifest + infer_resume_point + source-file check), the job remains `starting` in the DB forever. The `cancel()` function in `queue.py` also cannot recover it after a restart: the `_running` registry is empty (module reloaded), so `flag = _running.get(job_id)` returns None, the re-SELECT shows `starting` (not terminal), and the function logs a warning and returns without cancelling. The job is irrecoverable without manual DB intervention.
-
-The window is narrow (the ingest pre-check is fast), but the consequence is permanent: a stuck job that blocks the FIFO (it is not `queued` so `pull_next` skips it, but it is not terminal so the user cannot re-submit with the same id, and cancel cannot flip it).
-
-**Fix:** Include `'starting'` in the sweep and watchdog SELECT statements, OR have `run_job` call `update_stage("ingested")` (or an equivalent that sets status to `ingesting`) as the very first DB write before any other work, so the `starting` window is zero-width. The simplest fix is to add `'starting'` to the sweeps:
-
-```python
-# app/jobs/interrupt.py
-"SELECT id FROM jobs WHERE status IN ('starting','ingesting','transcribing')"
-
-# app/jobs/queue.py run_watchdog
-"SELECT id FROM jobs WHERE status IN ('starting','ingesting','transcribing')"
-```
-
-### CR-02: Completed transcript marked failed on restart
-
-**File:** `app/jobs/interrupt.py:78-82`
-**Issue:** `mark_interrupted_failed` selects jobs by status (`ingesting`/`transcribing`) without checking whether their stages are actually complete. If the process crashes after `update_stage("transcribed")` (DB status becomes `transcribing` via `stage_to_status`) but before `update_stage("done")`, the `transcript.json` is on disk and `manifest.current_stage` is `transcribed`. On restart, the sweep sees status=`transcribing` and marks the job `failed` -- even though `infer_resume_point` would return `done` (transcribed is complete, only the derived `done` transition remains). The user's completed transcription is orphaned: the folder is kept (mark_failed does not rmtree) but the job is `failed` and inaccessible through the API. The user must re-submit from scratch.
-
-The window is narrow (two sequential SQL commits), but the consequence is data loss from the user's perspective.
-
-**Fix:** Before marking a job failed, check whether its stages are actually complete via `infer_resume_point`. If the resume point is `done` (or `None` -- all complete), advance the job to `done` instead of failing it:
-
-```python
-for job_id in ids:
-    try:
-        manifest = await read_manifest(settings, job_id)
-    except FileNotFoundError:
-        await mark_failed(session, job_id, _INTERRUPTED_ERROR)
-        swept += 1
-        continue
-    resume_point = infer_resume_point(settings, job_id, manifest)
-    if resume_point is None or resume_point == "done":
-        # Stages are complete -- advance to done, do not fail.
-        async with session_factory() as s:
-            await update_stage(settings, s, job_id, "done")
-        continue
-    await mark_failed(session, job_id, _INTERRUPTED_ERROR)
-    # ... manifest write ...
-```
-
-### CR-03: run_job cannot advance to "done" on resume
-
-**File:** `app/jobs/orchestrator.py:211-282`
-**Issue:** `run_job` computes `skip_ingested` and `skip_transcribed` and only calls `update_stage("done")` inside the `if not skip_transcribed:` block (line 280-281). If both stages are already complete (`skip_ingested=True`, `skip_transcribed=True`) but `manifest.current_stage != "done"` (e.g., a crash between `update_stage("transcribed")` and `update_stage("done")` that was NOT swept, or a transient DB error on the `done` commit), the orchestrator falls through both `if` blocks and returns without calling `update_stage("done")`. The job remains in `transcribing` status forever. `pull_next` will not re-claim it (it is not `queued`), and the watchdog sees it as active but not stale (if `progress.json` mtime is fresh).
-
-This means even if CR-02 is fixed (sweep does not mark the job failed), the worker cannot recover the job -- it skips both stages and returns without advancing.
-
-**Fix:** After the two `if not skip_*` blocks, check whether the resume point was `done` and advance:
-
-```python
-# After the transcribing stage block, before the except clauses:
-if skip_ingested and skip_transcribed and manifest.current_stage != "done":
-    async with session_factory() as session:
-        await update_stage(settings, session, job_id, "done")
-    _publish({"type": "done"})
-```
-
-Or restructure to handle `resume_stage == "done"` explicitly at the top of the function.
+_None._ The gap-closure logic is correct on the happy paths and the documented
+crash windows. The two race conditions below are real but narrow-window and
+silent-failure rather than crash/data-loss — classified as WARNING.
 
 ## Warnings
 
-### WR-01: WebSocket snapshot sent before EventBus subscribe -- terminal events can be missed
+### WR-01: Queued-cancel race silently loses the cancel (`cancel_job` has no status guard)
 
-**File:** `app/api/routes_ws.py:179-191`
-**Issue:** The WS handler sends the state snapshot (line 188) BEFORE subscribing to the EventBus (line 191). If a `done`/`failed`/`cancelled` event is published between the snapshot read (`get_job` at line 149) and `bus.subscribe(job_id)` (line 191), the client misses it. The client receives a snapshot showing an active state (e.g., `transcribing`) but no terminal event ever arrives, so it waits indefinitely. The only recovery is a manual reconnect.
+**File:** `app/jobs/queue.py:215-222` (queued branch) and `app/jobs/cleanup.py:57-63` (`cancel_job` UPDATE)
+**Issue:** The cancel route's queued branch flow is:
 
-This is the classic subscribe-then-read vs read-then-subscribe race. The correct pattern is to subscribe FIRST, then read the snapshot, then relay queued events (the client may see a stale event followed by the snapshot's state, but it will always receive the terminal event).
+1. `queue.cancel` SELECTs the row, sees `status='queued'`, enters the queued branch.
+2. Calls `cancel_job(session, settings, job_id)`, which runs
+   `UPDATE jobs SET status='cancelled' WHERE id = :id` — **no status guard**.
+3. `cancel_job` commits, then rmtree's the folder.
 
-**Fix:** Subscribe to the bus before reading the snapshot:
+The single worker's `pull_next` does a conditional
+`UPDATE jobs SET status='starting' WHERE id = :id AND status='queued'` and
+commits. If the worker's claim commits **between** step 1 and step 2 above,
+`cancel_job`'s unconditional UPDATE flips the now-`'starting'` row to
+`'cancelled'` out from under the running worker. The orchestrator then runs
+`update_stage("ingested")` which overwrites `status` to `'ingesting'`, then
+`'transcribing'`, then `'done'`. The user's cancel is silently lost and the
+job runs to completion (its folder was rmtree'd by `cancel_job`, so the
+orchestrator may also fail mid-run when it cannot find `transcript.json`'s
+parent — depending on timing the job can end `'failed'` with a misleading
+error, or `'done'` if the folder was re-created by `atomic_write_json`'s
+tmp/replace path).
 
-```python
-queue = bus.subscribe(job_id)
-try:
-    # read snapshot (job row + manifest + progress.json)
-    ...
-    await websocket.send_json(snapshot)
-    # live relay
-    while True:
-        event = await queue.get()
-        await websocket.send_json(event)
-except WebSocketDisconnect:
-    pass
-except Exception:
-    _log.info("ws relay ended for %s", job_id, exc_info=True)
-finally:
-    registry.remove(job_id, websocket)
-    bus.unsubscribe(job_id, queue)
-```
+The docstring at `queue.py:185-188` defends the path by arguing the atomic
+claim prevents "double-run a cancelled queued job" — which is true — but it
+does not address the opposite direction (cancel arriving after the claim).
 
-### WR-02: WebSocket subscriber registry leak if snapshot send fails
-
-**File:** `app/api/routes_ws.py:162-204`
-**Issue:** `registry.add(job_id, websocket, cap)` is called at line 162, but the snapshot `send_json` at line 188 is OUTSIDE the `try/finally` block (line 192-204) that calls `registry.remove`. If the snapshot send raises (client disconnected between accept and snapshot, or a transport error), the exception propagates out of the handler without removing the subscriber from the registry. The dead `WebSocket` object remains in the registry's set for that `job_id`. Over time, accumulated dead subscribers can fill the registry up to `ws_subscriber_cap`, after which all new subscribers for that job are rejected with `subscriber_cap` -- a localized DoS.
-
-**Fix:** Move `registry.add` inside the `try` block, or extend the `try/finally` to cover the snapshot send:
+**Fix:** Make `cancel_job`'s UPDATE conditional on a non-terminal status, so a
+row that has already been claimed (`'starting'`) or progressed is NOT
+flipped by the queued-cancel path; the active-cancel path (the `_running`
+flag branch) handles those:
 
 ```python
-if not registry.add(job_id, websocket, settings.ws_subscriber_cap):
-    await websocket.send_json({"type": "error", "code": "subscriber_cap"})
-    await websocket.close(code=1008)
-    return
-
-queue = None
-try:
-    # snapshot
-    ...
-    await websocket.send_json(snapshot)
-    # live relay
-    queue = bus.subscribe(job_id)
-    while True:
-        event = await queue.get()
-        await websocket.send_json(event)
-except WebSocketDisconnect:
-    pass
-except Exception:
-    _log.info("ws relay ended for %s", job_id, exc_info=True)
-finally:
-    registry.remove(job_id, websocket)
-    if queue is not None:
-        bus.unsubscribe(job_id, queue)
+# app/jobs/cleanup.py -- cancel_job
+result = await session.execute(
+    text(
+        "UPDATE jobs SET status = 'cancelled', updated_at = :now "
+        "WHERE id = :id AND status NOT IN ('done','failed','cancelled')"
+    ),
+    {"now": utcnow_iso(), "id": job_id},
+)
 ```
 
-### WR-03: progress.json updated_at uses naive local time instead of UTC
+This still lets the queued-cancel succeed (row is `'queued'`), still lets the
+`JobCancelled` path in the orchestrator flip a `'starting'`/`'ingesting'`/
+`'transcribing'` row (those are not terminal), but prevents the queued branch
+from racing a row the worker has already claimed if the cancel route then
+falls back to the active-cancel path via a re-SELECT. Alternatively, the
+queued branch in `queue.cancel` should re-SELECT-then-UPDATE with
+`WHERE status='queued'` and treat `rowcount == 0` as "lost the race, re-SELECT
+and route to the active branch".
 
-**File:** `app/jobs/orchestrator.py:156`
-**Issue:** `_persist_progress` writes `"updated_at": datetime.now().isoformat()` which produces a naive local-time timestamp (no timezone suffix). The rest of the app uses `utcnow_iso()` (`datetime.now(timezone.utc).isoformat()`, producing `+00:00`-suffixed UTC). This inconsistency means `progress.json`'s `updated_at` is not comparable to other timestamps in the system (job `created_at`, `updated_at`, manifest `stage_timestamps`) and could confuse consumers that assume all timestamps are UTC ISO 8601.
+### WR-02: CR-03 resume-advance branch ignores `cancel_flag`
 
-**Fix:** Use the existing UTC helper:
+**File:** `app/jobs/orchestrator.py:284-297`
+**Issue:** The CR-03 advance branch runs `update_stage(..., "done")` and
+publishes `{"type": "done"}` unconditionally. It never checks
+`cancel_flag.is_set()`. Consider the resume window the branch was added to
+fix: transcript.json is on disk, `manifest.current_stage == "transcribed"`,
+DB `status == "transcribing"` (the crash happened between the two
+`update_stage` calls in the happy path). If the user hits
+`POST /jobs/{id}/cancel` while `run_job` is re-driving this job on the next
+worker tick, `queue.cancel` sees `status='transcribing'`, looks up
+`_running[job_id]`, and sets the flag. The orchestrator's chunker is not
+running (the transcribe block is skipped because `skip_transcribed` is True),
+so no `JobCancelled` is ever raised. Control reaches line 284, the branch
+advances the job to `'done'`, and the cancel intent is dropped on the floor.
+The user receives a 200 from the cancel route (still `'transcribing'` at that
+instant) but the next poll shows `'done'`.
+
+This is a correctness violation of the cooperative-cancel contract (D-06):
+a cancel against an active (`'transcribing'`) job should result in
+`'cancelled'`, not `'done'`. The fact that the underlying transcription is
+already file-complete is an implementation detail the user did not opt into.
+
+**Fix:** Check the cancel flag before the CR-03 advance and route to the
+existing `JobCancelled` path if it is set:
 
 ```python
-from app.util.time import utcnow_iso
-...
-"updated_at": utcnow_iso(),
+if resume_stage == "done":
+    if cancel_flag.is_set():
+        # User cancelled during the resume window. Treat the
+        # file-complete transcription as cancelled per D-06: raise
+        # JobCancelled so the existing except-handler runs cancel_job
+        # (DB + rmtree) and publishes {"type": "cancelled"}.
+        raise JobCancelled("cancelled during resume-advance")
+    async with session_factory() as session:
+        await update_stage(settings, session, job_id, "done")
+    _publish({"type": "done"})
+    _log.info("run_job %s: advanced to done via resume", job_id)
 ```
 
-### WR-04: Cooperative cancel (queue.cancel) is not wired to any API route
-
-**File:** `app/api/routes_jobs.py:131-155`, `app/jobs/queue.py:176-263`
-**Issue:** The new cooperative `cancel()` function in `queue.py` (which sets the `_running` threading.Event flag for running jobs, letting the chunker exit at the next chunk boundary via `JobCancelled`) is implemented and tested but NOT wired to any API route. The existing `POST /jobs/{id}/cancel` route (`post_cancel`) calls `cleanup.cancel_job` directly, which marks the DB row cancelled and rmtrees the folder. For a RUNNING job, this rmtrees the folder out from under the orchestrator -- the orchestrator's subsequent `atomic_write_json(transcript.json)` fails (directory gone), the exception handler calls `mark_failed` (which may fail or conflict with the already-cancelled row), and the model is unloaded in the finally block. This is destructive and non-cooperative.
-
-The Phase 4 cooperative cancel (setting the flag, letting the orchestrator's `JobCancelled` path do `cancel_job` cleanly) is inaccessible via the API. JOB-04 (cancel requirement) is only partially satisfied: queued cancel works, running cancel is destructive.
-
-**Fix:** Wire `post_cancel` to `queue.cancel` (or add a new route) so the cooperative cancel path is used for active jobs:
-
-```python
-@router.post("/{job_id}/cancel", response_model=JobResponse)
-async def post_cancel(job_id, session, settings):
-    canonical_id = validate_job_id(job_id)  # 400 on invalid
-    from app.jobs.queue import cancel
-    result = await cancel(canonical_id, session, settings)
-    if not result:  # {} -> 404
-        raise HTTPException(status_code=404, detail="job not found")
-    refreshed = await get_job(session, canonical_id)
-    ...
-```
+(`JobCancelled` is already imported at the top of the module from
+`app.jobs.errors`.)
 
 ## Info
 
-### IN-01: Unused `import uuid` in idempotency.py
+### IN-01: Redundant exception tuple in finally-block await
 
-**File:** `app/api/idempotency.py:141`
-**Issue:** `import uuid` is imported inside `resolve_or_create` but never used. The pending job id comes from `new_job_id()` (imported from `app.jobs.ids` at line 143). Dead code.
-**Fix:** Remove `import uuid`.
+**File:** `app/jobs/orchestrator.py:322`
+**Issue:** `except (asyncio.TimeoutError, JobCancelled, Exception)` is
+equivalent to `except Exception` because `Exception` subsumes both
+`asyncio.TimeoutError` and `JobCancelled`. The named exceptions are dead
+branch targets that mislead readers into thinking the handler distinguishes
+them.
+**Fix:** `except Exception:  # noqa: BLE001 -- cancel/timeout/crash all mean "thread is done or past our control"`
 
-### IN-02: Redundant SAIntegrityError in except clause
+### IN-02: `post_cancel` discards `queue_cancel`'s returned status and re-queries
 
-**File:** `app/api/idempotency.py:172`
-**Issue:** `except (SAIntegrityError, Exception) as exc:` -- `SAIntegrityError` is a subclass of `Exception`, so listing both is redundant. The subsequent `_is_integrity_error(exc)` check handles the distinction. The dual listing suggests the author was uncertain about the catch scope.
-**Fix:** Use `except Exception as exc:` and rely on `_is_integrity_error`.
+**File:** `app/api/routes_jobs.py:164-170`
+**Issue:** `queue_cancel` already performs up to two SELECTs and returns
+`{"status", "id"}`. The route then ignores that dict (apart from the empty
+check) and calls `get_job(session, canonical_id)` to build the response. The
+extra query is wasted work, and worse, for the running-cancel path the
+returned `JobResponse` will still show `status='transcribing'` (the
+orchestrator has not yet flipped it) — the route acknowledges this in its
+docstring but a client polling immediately after a "successful" cancel will
+see the pre-cancel status, which is confusing UX. Consider building the
+`JobResponse` directly from `queue_cancel`'s returned dict, or documenting
+the eventual-consistency window in the response body.
+**Fix:** Either drop the second `get_job` call and construct `JobResponse`
+from the dict, or add a `cancelled_at` / `cancel_pending` flag to the
+response so clients know to poll.
 
-### IN-03: Unused session_factory parameter in mark_interrupted_failed
+### IN-03: `_persist_progress` write may race with `cancel_job`'s rmtree
 
-**File:** `app/jobs/interrupt.py:43-47`
-**Issue:** `mark_interrupted_failed(session, settings, session_factory)` accepts `session_factory` but never uses it -- all DB work uses the `session` argument. The call site in `main.py` passes it, but it is dead.
-**Fix:** Remove the parameter, or use it if a per-job session is needed in a future fix (e.g., CR-02's `update_stage` call would need its own session).
+**File:** `app/jobs/orchestrator.py:165-173, 158-163`
+**Issue:** `_on_progress` schedules `_persist_progress` via
+`loop.create_task` from the worker thread. If the user cancels mid-transcribe,
+the orchestrator's `JobCancelled` path calls `cancel_job` which rmtree's the
+job directory. A `_persist_progress` task scheduled just before the rmtree
+will run after the directory is gone and fail in `atomic_write_json`. The
+exception is caught and logged at WARNING (`progress.json write failed for
+%s`), so this is log noise rather than a crash, but it can surface confusing
+warnings during normal cancel flows.
+**Fix:** No code change required; consider lowering the log level to DEBUG or
+gating the write on `not cancel_flag.is_set()`.
 
-### IN-04: No validation on ws_subscriber_cap and idempotency_ttl_hours
+### IN-04: Redundant final `session.commit()` in `mark_interrupted_failed`
 
-**File:** `app/models/settings.py:95-101`
-**Issue:** `ws_subscriber_cap: int = 16` and `idempotency_ttl_hours: int = 24` have no validators. A negative `ws_subscriber_cap` (e.g., -1) causes `SubscriberRegistry.add` to reject all subscribers (`len(subs) >= cap` is `0 >= -1` = True). A negative `idempotency_ttl_hours` causes the janitor to delete all rows immediately. A `ws_subscriber_cap` of 0 blocks all WS connections. These are edge cases via settings file edit, but the model is `extra="forbid"` with no range guard.
-**Fix:** Add `field_validator` or `Field(ge=1)` / `Field(ge=1)` constraints.
+**File:** `app/jobs/interrupt.py:158-159`
+**Issue:** Both `update_stage` (manifest.py:248) and `mark_failed`
+(cleanup.py:101) commit internally per call. The `if swept: await
+session.commit()` at the end of the sweep is therefore always a no-op. Not a
+bug, but it implies a transactional boundary that does not actually exist —
+the sweep is per-iteration committed, so a mid-sweep crash leaves partial
+state. That partial state is idempotent (next boot re-sweeps the un-swept
+rows), so the behavior is fine; the redundant commit just misleads readers
+into thinking the sweep is atomic.
+**Fix:** Remove the redundant commit, or add a comment noting the sweep is
+intentionally per-iteration committed and re-runnable.
 
-### IN-05: Idempotency contract violated in rare edge case (row deleted between collision and SELECT)
+### IN-05: `_running[job_id]` overwrite orphans prior cancel flag
 
-**File:** `app/api/idempotency.py:193-204`
-**Issue:** In the race path (IntegrityError on INSERT), if the SELECT for the existing `job_id` returns None (the winning row was deleted between the collision and the SELECT -- e.g., by the janitor or manual DB intervention), the code creates a NEW job with a fresh id and returns 201. This breaks the idempotency contract: a duplicate `Idempotency-Key` request returns a different job (201) instead of the original (200). In practice this is extremely unlikely (the janitor only deletes rows older than `idempotency_ttl_hours`, and the row was just inserted by the winner), but it is a contract violation.
-**Fix:** Retry the reservation (DELETE + INSERT) or return 409/503 instead of creating a new job. Alternatively, document that this path is acceptable degradation for an impossible-in-practice race.
+**File:** `app/jobs/orchestrator.py:119-120`
+**Issue:** `run_job` unconditionally assigns
+`_running[job_id] = cancel_flag` at entry. If `run_job` is somehow invoked
+twice for the same `job_id` (programmer error, double-enqueue, or a manual
+test harness driving the worker while the lifespan worker is also running),
+the second assignment orphans the first flag — a cancel routed during the
+overlap would set only the second flag, leaving the first run uncancellable.
+D-10 (strict serial, single worker) prevents this in production, but the
+code offers no defense-in-depth.
+**Fix:** Assert `_running.get(job_id) is None` at entry (or log a warning if
+a prior entry exists) to make double-invocation a loud failure rather than a
+silent orphan.
+
+### IN-06: `mark_interrupted_failed` advance path does not catch `FileNotFoundError` from `update_stage`
+
+**File:** `app/jobs/interrupt.py:127-144`
+**Issue:** The advance branch calls `update_stage(settings, session, job_id,
+"done")`, which internally calls `read_manifest` and raises `FileNotFoundError`
+if the manifest was deleted between the sweep's own `read_manifest` at line
+113 and the `update_stage` call at line 136 (narrow window — another process
+or a concurrent cancel's rmtree). The exception would propagate up from the
+sweep, aborting it with partial state (some jobs advanced, some not, the
+remainder never reached). The function already defends `read_manifest` with
+a `FileNotFoundError` try/except for the initial read but not for the
+`update_stage` re-read.
+**Fix:** Wrap the advance `update_stage` in a try/except `FileNotFoundError`
+that falls through to the `mark_failed` + failed-manifest write path (the
+job's folder is gone anyway).
 
 ---
 
-_Reviewed: 2026-06-23T00:00:00Z_
+_Reviewed: 2026-06-23_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
