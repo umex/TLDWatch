@@ -110,3 +110,53 @@ async def test_multiple_subscribers_fan_out() -> None:
     e1 = await asyncio.wait_for(q1.get(), timeout=1.0)
     e2 = await asyncio.wait_for(q2.get(), timeout=1.0)
     assert e1 == e2 == {"type": "stage_changed", "stage": "transcribing"}
+
+
+# --- Plan 04-03 extensions: backpressure confirmation + isolation ------------
+
+
+@pytest.mark.asyncio
+async def test_drop_oldest_on_overflow() -> None:
+    """Publishing 33 events to a maxsize=32 queue drops the OLDEST (not newest).
+
+    Confirms 04-01's EventBus backpressure (T-04-04 mitigation): the
+    subscriber misses the oldest event but keeps receiving the newest
+    ones -- the right trade-off for a progress stream.
+    """
+    bus = EventBus()
+    q = bus.subscribe("J-overflow")
+
+    for i in range(33):
+        bus.publish("J-overflow", {"type": "progress", "n": i})
+
+    # The queue is capped at 32; the OLDEST (n=0) was dropped, so the
+    # head is now n=1 and the tail is n=32.
+    assert q.qsize() == 32
+    first = await asyncio.wait_for(q.get(), timeout=1.0)
+    assert first["n"] == 1  # n=0 was dropped (drop-oldest, NOT drop-newest)
+
+    last_n: int | None = None
+    while not q.empty():
+        last_n = (await asyncio.wait_for(q.get(), timeout=1.0))["n"]
+    assert last_n == 32  # the newest survived
+
+
+@pytest.mark.asyncio
+async def test_multiple_subscribers_isolated() -> None:
+    """Two subscribers get their OWN queues; one event is delivered to both.
+
+    The subscribers are independent: dropping / draining one queue does not
+    affect the other. Confirms the EventBus keeps per-subscriber state.
+    """
+    bus = EventBus()
+    q1 = bus.subscribe("J-iso")
+    q2 = bus.subscribe("J-iso")
+
+    bus.publish("J-iso", {"type": "progress", "n": 1})
+
+    e1 = await asyncio.wait_for(q1.get(), timeout=1.0)
+    e2 = await asyncio.wait_for(q2.get(), timeout=1.0)
+    assert e1 == e2 == {"type": "progress", "n": 1}
+    # Both queues are now empty independently.
+    assert q1.empty()
+    assert q2.empty()
