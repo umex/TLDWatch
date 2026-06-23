@@ -49,6 +49,7 @@ async def create_job(
     settings: Settings,
     source_type: str | None = None,
     source_path: str | None = None,
+    job_id: str | None = None,
 ) -> JobResponse:
     """Create a new job end-to-end: DB row, per-job folder, manifest.
 
@@ -56,8 +57,16 @@ async def create_job(
     INSERT was committed, the row is DELETED before the exception
     propagates. A partial orphan (DB row but no folder or no
     manifest) is impossible.
+
+    Plan 04-03: ``job_id`` is optional. When ``None`` a fresh id is
+    generated (the existing behavior). When provided, the caller
+    (the idempotency key-first reservation flow) has already reserved
+    an idempotency_key row pointing at this id; the job is created
+    under that id so the duplicate-collapse path can resolve the
+    existing job by id.
     """
-    job_id = new_job_id()
+    if job_id is None:
+        job_id = new_job_id()
     now_iso = utcnow_iso()
 
     await session.execute(

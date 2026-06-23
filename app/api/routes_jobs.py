@@ -19,11 +19,12 @@ access via TrustedHostMiddleware is the security boundary.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_session, get_settings
+from app.api.idempotency import resolve_or_create
 from app.jobs.cleanup import cancel_job, mark_stale
 from app.jobs.ids import validate_job_id
 from app.jobs.manifest import update_stage
@@ -47,15 +48,51 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
     status_code=status.HTTP_201_CREATED,
 )
 async def post_job(
+    request: Request,
     payload: CreateJobRequest,
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> JobResponse:
-    return await create_job(
-        session,
-        settings,
-        source_type=payload.source_type,
-        source_path=payload.source_path,
+    """Create a new job, or collapse a duplicate ``Idempotency-Key`` to the existing job.
+
+    Plan 04-03 (SC-5, D-07, Fix 7):
+
+    - No ``Idempotency-Key`` header -> create a new job (201, existing
+      behavior).
+    - Valid ``Idempotency-Key`` + first call -> reserve the key +
+      create a new job under the reserved id (201).
+    - Valid ``Idempotency-Key`` + duplicate call -> the key INSERT
+      collides (IntegrityError); the handler re-reads the existing job
+      and returns it (200, NOT 201) with no orphan duplicate (Fix 7 --
+      Codex HIGH).
+    - Invalid / oversized ``Idempotency-Key`` -> 422 BEFORE any DB
+      write (T-04-01, Codex MEDIUM -- exact exception path).
+
+    The status code is set per-response via the ``Response`` dependency
+    (201 for new, 200 for duplicate); the route's declared 201 is the
+    default for the no-key + first-key paths.
+    """
+    try:
+        response, status_code = await resolve_or_create(
+            request,
+            session,
+            settings,
+            lambda job_id=None: create_job(
+                session,
+                settings,
+                source_type=payload.source_type,
+                source_path=payload.source_path,
+                job_id=job_id,
+            ),
+        )
+    except ValueError:
+        # validate_idempotency_key rejected the header (T-04-01).
+        # 422 BEFORE any DB write (Codex MEDIUM -- exact exception path).
+        raise HTTPException(status_code=422, detail="invalid Idempotency-Key")
+    return Response(
+        content=response.model_dump_json(),
+        media_type="application/json",
+        status_code=status_code,
     )
 
 
