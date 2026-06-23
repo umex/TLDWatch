@@ -1045,3 +1045,128 @@ async def test_transcribed_job_advanced_to_done_on_boot(tmp_data_dir: Path) -> N
     # The advance path does not set an error (the failed path sets
     # "interrupted (backend restarted)").
     assert m_after.error != "interrupted (backend restarted)"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 plan 04-REVIEW -- WR-02 gap-closure regression test (TDD RED-first).
+#
+# ``test_resume_advance_respects_cancel_flag`` simulates a cancel arriving
+# while run_job is re-driving a CR-03 crash-window job (transcript.json on
+# disk, manifest.current_stage='transcribed', DB status='transcribing').
+# The cancel route sets ``_running[job_id]``; the CR-03 advance branch
+# (orchestrator.py:284-297) must check ``cancel_flag.is_set()`` BEFORE
+# advancing and raise ``JobCancelled`` so the existing except-handler runs
+# the cooperative cancel path (D-06). Before the fix the branch advanced
+# the job to 'done' and the cancel was silently dropped.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resume_advance_respects_cancel_flag(tmp_data_dir: Path) -> None:
+    """WR-02: a cancel during the CR-03 resume window cancels, not advances to done.
+
+    Simulates a cancel arriving while ``run_job`` is re-driving a
+    crash-window job (transcript.json on disk, manifest.current_stage=
+    'transcribed', DB status='transcribing'). The cancel route sets
+    ``_running[job_id]``; the CR-03 advance branch must check
+    ``cancel_flag.is_set()`` BEFORE advancing and raise ``JobCancelled``
+    so the existing except-handler runs the cooperative cancel path
+    (D-06). Before the fix the branch advanced the job to 'done' and the
+    cancel was silently dropped.
+
+    The cancel timing is simulated by monkeypatching
+    ``infer_resume_point``: run_job registers ``_running[job_id]`` at
+    line 120 (BEFORE the infer_resume_point call at line 204), so the
+    patched function grabs that flag, sets it (simulating the cancel
+    route), and returns ``"done"`` so the CR-03 advance branch is
+    reached.
+    """
+    s = _settings(tmp_data_dir)
+    sf = await _session_factory(s)
+    job_id = await _make_local_job(s, sf)
+
+    # Pre-write a valid transcript.json + force manifest.current_stage=
+    # 'transcribed' + DB status='transcribing' -- the post-crash state
+    # where update_stage("transcribed") committed but the subsequent
+    # update_stage("done") did not (the CR-03 resume window).
+    from app.models.transcript import Transcript, TranscriptSegment
+    from app.storage.atomic import atomic_write_json
+    from sqlalchemy import text
+
+    transcript = Transcript(
+        job_id=job_id,
+        language="en",
+        segments=[TranscriptSegment(start_s=0.0, end_s=1.0, text="hi")],
+    )
+    await atomic_write_json(
+        transcript_path(s, job_id), transcript.model_dump(mode="json")
+    )
+    m = await read_manifest(s, job_id)
+    m = m.model_copy(update={"current_stage": "transcribed"})
+    await write_manifest(s, m)
+    async with sf() as session:
+        await session.execute(
+            text("UPDATE jobs SET status = :s WHERE id = :id"),
+            {"s": "transcribing", "id": job_id},
+        )
+        await session.commit()
+
+    # Monkeypatch ``infer_resume_point`` so that AFTER run_job registers
+    # its cancel_flag in ``_running`` (line 120, BEFORE the call at line
+    # 204), we set the flag to simulate a cancel arriving during the
+    # resume window, then return "done" so the CR-03 advance branch is
+    # reached.
+    import app.jobs.orchestrator as orch
+
+    orig_infer = orch.infer_resume_point
+
+    def _cancel_during_resume(settings, jid, manifest):  # noqa: ANN001
+        flag = orch._running.get(jid)
+        assert flag is not None, (
+            "run_job must register _running[job_id] before calling "
+            "infer_resume_point"
+        )
+        flag.set()
+        return "done"
+
+    orch.infer_resume_point = _cancel_during_resume
+
+    bus = EventBus()
+    q = bus.subscribe(job_id)
+    try:
+        # run_job's JobCancelled path catches the raised JobCancelled,
+        # runs cancel_job (DB + rmtree), and publishes
+        # {"type": "cancelled"}. It does NOT re-raise, so the call
+        # returns normally.
+        await run_job(s, sf, job_id, bus=bus, adapter=FakeAdapter())
+    finally:
+        orch.infer_resume_point = orig_infer
+
+    # The job is cancelled, NOT done.
+    async with sf() as session:
+        row = await get_job(session, job_id)
+    assert row is not None
+    assert row.status == "cancelled", (
+        f"WR-02: cancel during the CR-03 resume window must result in "
+        f"'cancelled', not 'done'; got status={row.status!r}"
+    )
+
+    # The folder was removed by cancel_job (the JobCancelled path).
+    assert not job_dir(s, job_id).exists(), (
+        "WR-02: the JobCancelled path must rmtree the job folder"
+    )
+
+    # The bus received {"type": "cancelled"} and NOT {"type": "done"}.
+    events: list[dict] = []
+    while True:
+        try:
+            events.append(q.get_nowait())
+        except asyncio.QueueEmpty:
+            break
+    assert any(ev.get("type") == "cancelled" for ev in events), (
+        f"expected a 'cancelled' event on the bus, got: {events}"
+    )
+    assert not any(ev.get("type") == "done" for ev in events), (
+        f"WR-02: the CR-03 advance branch must NOT publish 'done' when "
+        f"the cancel flag is set; got: {events}"
+    )
