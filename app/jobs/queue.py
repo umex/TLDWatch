@@ -53,11 +53,18 @@ async def enqueue(job_id: str, session) -> None:
     """Mark ``job_id`` as queued so the worker picks it up (status-aware).
 
     Codex MEDIUM (T-04-12): the conditional UPDATE only touches rows in a
-    valid pre-active state (``status IN ('created','queued')``). A row in
-    any terminal (``done`` / ``failed`` / ``cancelled``) or active
+    valid pre-active state (``status IN ('uploading','created','queued')``).
+    A row in any terminal (``done`` / ``failed`` / ``cancelled``) or active
     (``starting`` / ``ingesting`` / ``transcribing``) state is left
     untouched so a stale enqueue cannot resurrect a finished or in-flight
     job.
+
+    Phase 5 (D-11, Pitfall 1): ``'uploading'`` is now included so the
+    streaming upload route can enqueue a job that was created in
+    ``status='uploading'`` (pre-queued, invisible to ``pull_next``) once
+    the file has landed atomically on disk. ``pull_next`` still selects
+    only ``status='queued'`` rows, so an uploading job is never picked up
+    mid-upload.
 
     After the commit the worker is woken via ``_work_signal.set()``. The
     hybrid wakeup (Fix 1) means a missed signal is self-healed by the 2s
@@ -66,7 +73,7 @@ async def enqueue(job_id: str, session) -> None:
     result = await session.execute(
         text(
             "UPDATE jobs SET status = 'queued', updated_at = :now "
-            "WHERE id = :id AND status IN ('created','queued')"
+            "WHERE id = :id AND status IN ('uploading','created','queued')"
         ),
         {"now": utcnow_iso(), "id": job_id},
     )

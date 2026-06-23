@@ -123,6 +123,81 @@ async def create_job(
     )
 
 
+async def create_upload_job(
+    session: AsyncSession,
+    settings: Settings,
+    job_id: str | None = None,
+) -> JobResponse:
+    """Create a new job in the pre-queued ``status='uploading'`` state.
+
+    Phase 5 (D-11, Pitfall 1): mirrors :func:`create_job` exactly EXCEPT
+    the INSERT hardcodes ``status='uploading'``, ``source_type='local'``,
+    ``source_path=None``, ``current_stage=None``. The Phase 4 worker's
+    ``pull_next`` selects only ``status='queued'`` rows, so an uploading
+    job is invisible to the worker until the streaming upload route calls
+    :func:`app.jobs.queue.enqueue` (the widened clause accepts
+    ``'uploading'``) after the file has landed atomically on disk. This
+    closes the race where the worker picked up a queued job mid-upload
+    and marked it ``failed`` with ``"source file missing or empty"``.
+
+    Plan 01-04 H5: if the folder/manifest step fails after the DB
+    INSERT was committed, the row is DELETED before the exception
+    propagates (same compensation as :func:`create_job`). The
+    ensure_job_dir + write_manifest(empty_manifest) + compensation-DELETE
+    ordering is identical to :func:`create_job`.
+    """
+    if job_id is None:
+        job_id = new_job_id()
+    now_iso = utcnow_iso()
+
+    await session.execute(
+        text(
+            "INSERT INTO jobs "
+            "(id, created_at, status, source_type, source_path, current_stage) "
+            "VALUES (:id, :created_at, 'uploading', 'local', NULL, NULL)"
+        ),
+        {
+            "id": job_id,
+            "created_at": now_iso,
+        },
+    )
+    await session.commit()
+
+    # H5: compensate by DELETing the just-INSERTed row on any failure
+    # in the folder/manifest step (same invariant as create_job).
+    try:
+        await ensure_job_dir(settings, job_id)
+        await write_manifest(settings, empty_manifest(job_id))
+    except Exception as exc:
+        _log.warning(
+            "create_upload_job: folder/manifest step failed for %s (%s); "
+            "compensating by deleting the DB row",
+            job_id,
+            exc,
+        )
+        try:
+            await session.execute(
+                text("DELETE FROM jobs WHERE id = :id"),
+                {"id": job_id},
+            )
+            await session.commit()
+        except Exception:  # pragma: no cover - defensive logging only
+            _log.exception(
+                "create_upload_job: compensation DELETE failed for %s; "
+                "orphan row may remain",
+                job_id,
+            )
+        raise
+
+    return JobResponse(
+        id=job_id,
+        status="uploading",
+        created_at=datetime.fromisoformat(now_iso),
+        source_type="local",
+        current_stage=None,
+    )
+
+
 async def list_jobs(
     session: AsyncSession,
     status: str | None = None,
