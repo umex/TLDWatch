@@ -23,7 +23,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **JOB-03**: App persists all completed jobs to local history; user can revisit, edit, and re-export
 - [x] **JOB-04**: Job queue state persists across app restarts
 - [x] **JOB-05**: User can cancel a queued or running job
-- [ ] **JOB-06**: User sees per-job progress (current stage, percent, ETA) in real time
+- [x] **JOB-06**: User sees per-job progress (current stage, percent, ETA) in real time
 
 ### Transcription & Diarization
 
@@ -136,7 +136,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | JOB-03 | Phase 5 | Pending |
 | JOB-04 | Phase 4 | Complete |
 | JOB-05 | Phase 4 | Complete |
-| JOB-06 | Phase 4 | Pending |
+| JOB-06 | Phase 4 | Complete |
 | TRANS-01 | Phase 3 | Complete |
 | TRANS-02 | Phase 7 | Pending |
 | TRANS-03 | Phase 7 | Pending |
