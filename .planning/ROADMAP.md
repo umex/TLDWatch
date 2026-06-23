@@ -164,7 +164,7 @@ Plans:
 
 **Wave 1** (back-end upload + FE scaffold run in parallel; zero cross-plan file overlap)
 
-- [ ] 05-01-PLAN.md — Streaming upload endpoint (POST /jobs/upload, raw body via request.stream()) + transcript read endpoint (GET /jobs/{id}/transcript) + pre-queued 'uploading' status race-fix (autonomous; INGEST-01, JOB-03)
+- [x] 05-01-PLAN.md — Streaming upload endpoint (POST /jobs/upload, raw body via request.stream()) + transcript read endpoint (GET /jobs/{id}/transcript) + pre-queued 'uploading' status race-fix (autonomous; INGEST-01, JOB-03)
 - [ ] 05-02a-PLAN.md — Greenfield React scaffold + Vitest infra + API layer (client.ts idempotencyKey SHA-256, ws.ts, jobs.ts hooks) + codegen types + CSS Design System (autonomous; INGEST-01, UI-01, UI-02)
 
 **Wave 2** (blocked on Wave 1 completion; FE shell depends on FE scaffold 05-02a)
