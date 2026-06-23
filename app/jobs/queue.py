@@ -295,7 +295,7 @@ async def run_watchdog(
                 result = await session.execute(
                     text(
                         "SELECT id FROM jobs "
-                        "WHERE status IN ('ingesting','transcribing')"
+                        "WHERE status IN ('starting','ingesting','transcribing')"
                     )
                 )
                 ids = [row[0] for row in result.fetchall()]
