@@ -13,7 +13,8 @@ findings:
   warning: 2
   info: 6
   total: 8
-status: issues_found
+warning_resolved: 2
+status: resolved
 ---
 
 # Phase 04: Code Review Report
@@ -64,9 +65,10 @@ silent-failure rather than crash/data-loss — classified as WARNING.
 
 ## Warnings
 
-### WR-01: Queued-cancel race silently loses the cancel (`cancel_job` has no status guard)
+### WR-01: Queued-cancel race silently loses the cancel (`cancel_job` has no status guard) — RESOLVED
 
 **File:** `app/jobs/queue.py:215-222` (queued branch) and `app/jobs/cleanup.py:57-63` (`cancel_job` UPDATE)
+**Status:** resolved (fix(04-review): WR-01 guard queued-cancel against claim race — commit 925fe17; regression test `test_cancel_queued_race_routes_to_active` GREEN)
 **Issue:** The cancel route's queued branch flow is:
 
 1. `queue.cancel` SELECTs the row, sees `status='queued'`, enters the queued branch.
@@ -116,9 +118,10 @@ queued branch in `queue.cancel` should re-SELECT-then-UPDATE with
 `WHERE status='queued'` and treat `rowcount == 0` as "lost the race, re-SELECT
 and route to the active branch".
 
-### WR-02: CR-03 resume-advance branch ignores `cancel_flag`
+### WR-02: CR-03 resume-advance branch ignores `cancel_flag` — RESOLVED
 
 **File:** `app/jobs/orchestrator.py:284-297`
+**Status:** resolved (fix(04-review): WR-02 check cancel_flag before CR-03 resume advance — commit e67197d; regression test `test_resume_advance_respects_cancel_flag` GREEN)
 **Issue:** The CR-03 advance branch runs `update_stage(..., "done")` and
 publishes `{"type": "done"}` unconditionally. It never checks
 `cancel_flag.is_set()`. Consider the resume window the branch was added to
