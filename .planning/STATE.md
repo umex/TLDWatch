@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: planning
-stopped_at: Phase 5 context gathered
-last_updated: "2026-06-23T15:11:20.414Z"
+stopped_at: Phase 5 UI-SPEC approved
+last_updated: "2026-06-23T17:15:42.000Z"
 last_activity: 2026-06-23
 progress:
   total_phases: 10
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 Phase: 5
 Plan: Not started
-Status: Phase 04 complete (6/6 plans, all gap-closures verified — CR-01/02/03 + WR-04 closed, WR-01/WR-02 race warnings fixed); ready to plan Phase 5
+Status: Phase 5 UI-SPEC approved (Gemini-led design contract, gsd-ui-checker 6/6 PASS); ready to plan Phase 5
 Last activity: 2026-06-23
 
 Progress: [████████████████████] 18/18 plans (100% of milestone plans so far) — 4/10 phases complete
@@ -123,9 +123,9 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-23T15:11:20.406Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-local-file-ingest-history-ui-3-pane-layout/05-CONTEXT.md
+Last session: 2026-06-23T17:15:42.000Z
+Stopped at: Phase 5 UI-SPEC approved
+Resume file: .planning/phases/05-local-file-ingest-history-ui-3-pane-layout/05-UI-SPEC.md
 
 ### Gap-closure wave (01-04) — closed
 
