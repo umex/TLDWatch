@@ -25,8 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_session, get_settings
 from app.api.idempotency import resolve_or_create
-from app.jobs.cleanup import cancel_job, mark_stale
+from app.jobs.cleanup import mark_stale
 from app.jobs.ids import validate_job_id
+from app.jobs.queue import cancel as queue_cancel
 from app.jobs.manifest import update_stage
 from app.jobs.service import LIST_LIMIT_CAP, LIST_LIMIT_DEFAULT, create_job, get_job, list_jobs
 from app.models.job import (
@@ -134,23 +135,37 @@ async def post_cancel(
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> JobResponse:
-    """Cancel a job: mark the DB row cancelled and delete the per-job folder.
+    """Cancel a job via the cooperative ``queue.cancel`` path (WR-04, D-06).
 
-    The DB UPDATE happens first; the folder delete is best-effort
-    and the row is marked cancelled even if the folder delete
-    fails (a future call can retry). Returns 400 if the job id is
-    not a valid UUID, 404 if no such job exists.
+    The route calls ``queue.cancel(job_id, session, settings)`` -- the
+    cooperative cancel implemented in plan 04-02 -- and maps the returned
+    ``{status, id}`` dict to a :class:`JobResponse`:
+
+    - ``{}`` (job not found) -> 404.
+    - ``queued``: ``queue.cancel`` runs ``cancel_job`` (DB-first + rmtree) +
+      ``_work_signal.set``; the route returns 200 with the cancelled row.
+    - ``running`` (starting / ingesting / transcribing): ``queue.cancel`` only
+      sets the ``_running`` threading.Event cancel flag; the orchestrator's
+      ``JobCancelled`` path does the ``cancel_job`` + rmtree at the next chunk
+      boundary (no destructive out-from-under rmtree -- WR-04). The route
+      returns 200 with the current row (still ``transcribing`` at the moment
+      of return -- the orchestrator flips it asynchronously).
+    - ``terminal`` (done / failed / cancelled): ``queue.cancel`` is a no-op
+      returning the row unchanged (D-06 idempotent); the route returns 200
+      with the row (NOT 404 -- a second cancel is a no-op).
+
+    Returns 400 if the job id is not a valid UUID.
     """
     try:
         canonical_id = validate_job_id(job_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid job id") from exc
 
-    ok = await cancel_job(session, settings, canonical_id)
-    if not ok:
+    result = await queue_cancel(canonical_id, session, settings)
+    if not result:  # {} -> job not found
         raise HTTPException(status_code=404, detail="job not found")
     refreshed = await get_job(session, canonical_id)
-    if refreshed is None:  # pragma: no cover - cancel_job just updated the row
+    if refreshed is None:  # pragma: no cover - queue.cancel just SELECTed the row
         raise HTTPException(status_code=404, detail="job not found")
     return refreshed
 
