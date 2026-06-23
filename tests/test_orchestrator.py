@@ -879,3 +879,169 @@ async def test_resume_advances_to_done_when_both_stages_complete(
         "FakeAdapter.transcribe should not be called when transcript.json "
         "already exists (skip_transcribed=True)"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 plan 04-05 -- CR-01 + CR-02 gap-closure regression tests (TDD RED).
+#
+# ``test_starting_job_swept_to_failed`` (CR-01): a job that crashed in the
+# transient ``starting`` status (between pull_next's atomic claim and
+# run_job's first update_stage) is recovered on the next boot -- the sweep
+# SELECT is widened to include ``'starting'``. The job has NO stage output
+# (ingested not yet complete), so ``infer_resume_point`` returns
+# ``"ingested"`` (NOT None, NOT "done") and the sweep proceeds to
+# ``mark_failed``. The infer_resume_point consultation must NOT accidentally
+# advance a starting job to done.
+#
+# ``test_transcribed_job_advanced_to_done_on_boot`` (CR-02): a job that
+# crashed AFTER ``update_stage("transcribed")`` but BEFORE
+# ``update_stage("done")`` (transcript.json on disk,
+# manifest.current_stage="transcribed", DB status="transcribing") is
+# ADVANCED to ``done`` on the next boot -- the sweep consults
+# ``infer_resume_point`` per swept job and, when resume_point is None or
+# "done", calls ``update_stage("done")`` INSTEAD of ``mark_failed``. The
+# user's completed transcription is preserved (transcript.json NOT
+# rmtree'd).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_starting_job_swept_to_failed(tmp_data_dir: Path) -> None:
+    """CR-01: a `starting` job at boot is swept and correctly FAILED (not advanced).
+
+    Mirrors the crash window between ``pull_next``'s atomic claim
+    (``UPDATE jobs SET status='starting'``) and run_job's first
+    ``update_stage("ingested")``: no source file on disk,
+    manifest.source_path is None. The widened sweep SELECT
+    (``status IN ('starting','ingesting','transcribing')``) catches it.
+    The infer_resume_point consultation returns ``"ingested"`` (not None,
+    not "done"), so the sweep proceeds to ``mark_failed`` -- the starting
+    job is NOT advanced to done.
+    """
+    if not _QUEUE_AVAILABLE:
+        pytest.xfail("app.jobs.queue + app.jobs.interrupt not implemented yet")
+    from app.jobs.interrupt import mark_interrupted_failed
+
+    s = _settings(tmp_data_dir)
+    sf = await _sf(s)
+
+    # Create the job WITHOUT _make_local_job: create_job writes the DB row
+    # + an empty manifest (source_path=None) + an empty job dir. NO source
+    # file is written, manifest.source_path is NOT patched -- this is the
+    # starting crash window (pull_next claimed it, run_job has not yet
+    # called update_stage("ingested")).
+    async with sf() as session:
+        job = await create_job(session, s, source_type="local")
+        job_id = job.id
+
+    # Force the transient `starting` status (the post-claim, pre-ingest
+    # window).
+    await _force_status(sf, job_id, "starting")
+
+    # Run the boot sweep.
+    async with sf() as session:
+        swept = await mark_interrupted_failed(session, s, sf)
+
+    # CR-01: the `starting` row was swept (NOT skipped).
+    assert swept == 1, "starting job must be swept (CR-01)"
+
+    # The starting job is correctly FAILED, NOT advanced to done.
+    # infer_resume_point returns "ingested" (no source file, manifest.source_path
+    # is None) -> not None, not "done" -> mark_failed branch fires.
+    async with sf() as session:
+        row = await get_job(session, job_id)
+    assert row is not None
+    assert row.status == "failed", (
+        f"starting job must be FAILED (infer_resume_point returns 'ingested', "
+        f"not None/'done'); got status={row.status!r}"
+    )
+    assert row.status != "done"
+
+    # The manifest is also failed (the existing failed-manifest write path).
+    m = await read_manifest(s, job_id)
+    assert m.status == "failed"
+    assert m.current_stage == "failed"
+
+
+@pytest.mark.asyncio
+async def test_transcribed_job_advanced_to_done_on_boot(tmp_data_dir: Path) -> None:
+    """CR-02: a crash-window transcribed job is ADVANCED to done on boot (not failed).
+
+    Simulates the crash AFTER ``update_stage("transcribed")`` but BEFORE
+    ``update_stage("done")``: transcript.json is on disk (file-as-truth
+    says transcribed is complete), manifest.current_stage="transcribed",
+    DB status="transcribing". The sweep consults infer_resume_point per
+    swept job; resume_point == "done" (ingested + transcribed
+    file-complete but current_stage != "done") -> the advance branch
+    calls ``update_stage("done")`` INSTEAD of ``mark_failed``. The user's
+    completed transcription is preserved.
+    """
+    if not _QUEUE_AVAILABLE:
+        pytest.xfail("app.jobs.queue + app.jobs.interrupt not implemented yet")
+    from app.jobs.interrupt import mark_interrupted_failed
+    from app.models.transcript import Transcript, TranscriptSegment
+    from app.storage.atomic import atomic_write_json
+
+    s = _settings(tmp_data_dir)
+    sf = await _sf(s)
+
+    # Use _make_local_job so source.mp4 + manifest.source_path are set
+    # (is_stage_complete("ingested")=True).
+    job_id = await _make_local_job(s, sf)
+
+    # Pre-write a valid transcript.json (must parse as Transcript so
+    # is_stage_complete("transcribed")=True via parse_stage_file's
+    # model_cls=Transcript validation).
+    transcript = Transcript(
+        job_id=job_id,
+        language="en",
+        segments=[TranscriptSegment(start_s=0.0, end_s=1.0, text="hi")],
+    )
+    await atomic_write_json(
+        transcript_path(s, job_id), transcript.model_dump(mode="json")
+    )
+
+    # Force manifest.current_stage="transcribed" (the post-crash state).
+    m = await read_manifest(s, job_id)
+    m = m.model_copy(update={"current_stage": "transcribed"})
+    await write_manifest(s, m)
+
+    # Force DB status="transcribing" (the post-crash state).
+    await _force_status(sf, job_id, "transcribing")
+
+    # Sanity: infer_resume_point returns "done" in this crash window.
+    manifest_before = await read_manifest(s, job_id)
+    assert infer_resume_point(s, job_id, manifest_before) == "done"
+
+    # Run the boot sweep.
+    async with sf() as session:
+        swept = await mark_interrupted_failed(session, s, sf)
+
+    # CR-02: the job was swept (the SELECT includes 'transcribing')...
+    assert swept == 1
+
+    # ...and ADVANCED to done (NOT failed). The advance branch fired
+    # because resume_point == "done".
+    async with sf() as session:
+        row = await get_job(session, job_id)
+    assert row is not None
+    assert row.status == "done", (
+        f"transcribed crash-window job must be ADVANCED to done (CR-02), "
+        f"not failed; got status={row.status!r}"
+    )
+
+    # update_stage wrote both manifest fields (manifest is the source of truth).
+    m_after = await read_manifest(s, job_id)
+    assert m_after.current_stage == "done"
+    assert m_after.status == "done"
+
+    # The user's completed transcription is preserved (NOT rmtree'd -- the
+    # advance path calls update_stage, not mark_failed+failed-manifest-write).
+    assert transcript_path(s, job_id).exists(), (
+        "transcript.json must be preserved (CR-02 -- the user's completed "
+        "transcription is NOT orphaned)"
+    )
+
+    # The advance path does not set an error (the failed path sets
+    # "interrupted (backend restarted)").
+    assert m_after.error != "interrupted (backend restarted)"
