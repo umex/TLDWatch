@@ -158,18 +158,19 @@ Plans:
   4. The currently active transcript line is highlighted based on scroll position so the user can locate context.
   5. The user can re-open a completed job, see its existing transcript, and re-export it.
 
-**Plans**: 3 plans (2 Wave-1 parallel + 1 Wave-2 integration)
+**Plans**: 4 plans (Wave-1: back-end + FE scaffold + FE shell; Wave-2: integration)
 
 Plans:
 
-**Wave 1** (back-end upload + FE shell run in parallel; zero file overlap)
+**Wave 1** (back-end upload + FE scaffold run in parallel; FE shell depends on FE scaffold; zero cross-plan file overlap)
 
-- [ ] 05-01-PLAN.md — Streaming upload endpoint (POST /jobs/upload) + transcript read endpoint (GET /jobs/{id}/transcript) + pre-queued 'uploading' status race-fix (autonomous; INGEST-01, JOB-03)
-- [ ] 05-02-PLAN.md — Greenfield React app scaffold + routes + 2-pane detail + drop zone + active-job cards (autonomous; INGEST-01, UI-01, UI-02)
+- [ ] 05-01-PLAN.md — Streaming upload endpoint (POST /jobs/upload, raw body via request.stream()) + transcript read endpoint (GET /jobs/{id}/transcript) + pre-queued 'uploading' status race-fix (autonomous; INGEST-01, JOB-03)
+- [ ] 05-02a-PLAN.md — Greenfield React scaffold + Vitest infra + API layer (client.ts idempotencyKey SHA-256, ws.ts, jobs.ts hooks) + codegen types + CSS Design System (autonomous; INGEST-01, UI-01, UI-02)
+- [ ] 05-02b-PLAN.md — App shell + routes + 2-pane detail + drop zone + active-job cards + XHR-PRIMARY useUpload (real 0->100 percent per locked D-02) + history list/row (autonomous; depends on 05-02a; INGEST-01, UI-01, UI-02)
 
 **Wave 2** (blocked on Wave 1 completion)
 
-- [ ] 05-03-PLAN.md — Scroll-spy active-line highlight + history terminal-transition refetch + re-open-loads-transcript + full end-to-end suite (autonomous; UI-03, JOB-03, UI-01)
+- [ ] 05-03-PLAN.md — Scroll-spy active-line highlight + history terminal-transition refetch + re-open-loads-transcript + full end-to-end suite (autonomous; depends on 05-01 + 05-02b; UI-03, JOB-03, UI-01)
 
 ### Phase 6: YouTube Ingest + Sequential Playlist Queue
 

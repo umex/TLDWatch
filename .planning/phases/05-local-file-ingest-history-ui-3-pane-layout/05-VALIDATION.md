@@ -69,12 +69,14 @@ created: 2026-06-23
 - [ ] `tests/test_transcript_endpoint.py` — stubs for D-14 (`GET /jobs/{id}/transcript`, 404 when none)
 - [ ] `tests/test_upload_idempotency.py` — stubs for D-11 idempotent re-drop
 - [ ] `tests/test_history_list.py` — stubs for JOB-03 (history list)
-- [ ] `web/vitest.config.ts` — Vitest config for the new FE codebase (jsdom environment for scroll-spy + component tests)
-- [ ] `web/src/test/setup.ts` — Vitest setup (mock IntersectionObserver, mock WebSocket, fetch polyfill via msw or `vi.fn`)
-- [ ] `web/src/hooks/useScrollSpy.test.ts` — stubs for UI-03
-- [ ] `web/src/api/jobs.test.ts` — stubs for JOB-03 (history list fetch + transcript fetch)
-- [ ] `web/src/pages/DetailPage.test.tsx` — stubs for UI-01 (2-pane detail grid)
-- [ ] FE framework install: `cd web && npm install -D vitest @testing-library/react jsdom` — if not present after `npm create vite`
+- [ ] `web/vitest.config.ts` — Vitest config for the new FE codebase (jsdom environment for scroll-spy + component tests) — created TDD-style in 05-02a Task 1 (not pre-stubbed in a separate Wave 0 task)
+- [ ] `web/src/test/setup.ts` — Vitest setup (mock IntersectionObserver, mock WebSocket, mock fetch, mock XHR) — created TDD-style in 05-02a Task 1 (not pre-stubbed)
+- [ ] `web/src/hooks/useScrollSpy.test.ts` — covers UI-03 — created TDD-style in 05-03 Task 1 (RED-GREEN within the implementation task; not pre-stubbed in a separate Wave 0 task)
+- [ ] `web/src/api/jobs.test.ts` — covers JOB-03 (history list fetch + transcript fetch) + the useUpload progress 0->100 assertion (D-02) — created TDD-style in 05-02b Task 2 (not pre-stubbed)
+- [ ] `web/src/pages/DetailPage.test.tsx` — covers UI-01 (2-pane detail grid) + UI-02 (no `<video>`) — created TDD-style in 05-02b Task 1 (not pre-stubbed)
+- [ ] FE framework install: `cd web && npm install -D vitest @testing-library/react jsdom` — performed in 05-02a Task 1 (part of the Vite scaffold, not a separate Wave 0 step)
+
+> **FE test stub strategy (INFO 4 resolution):** the FE test files (`DetailPage.test.tsx`, `jobs.test.ts`, `useScrollSpy.test.ts`) and the Vitest infra (`vitest.config.ts`, `setup.ts`) are NOT pre-stubbed in a dedicated Wave 0 task. They are created TDD-style (RED-GREEN) within their implementation tasks (05-02a Task 1, 05-02b Tasks 1+2, 05-03 Task 1) because the FE is greenfield and each test is co-located with the code it specifies. The back-end Wave 0 stubs (the 7 `tests/test_*.py` files) ARE pre-stubbed in 05-01 Task 1 per the existing pattern. The `nyquist_compliant` / sign-off below is the verifier's job at execution time; this revision only clarifies the FE stub strategy.
 
 *Existing back-end test infrastructure (pytest, conftest.py, httpx `ASGITransport`) covers the integration test path — new routes are tested via the same `httpx.AsyncClient` + FastAPI app pattern used by the 42 existing test files.*
 

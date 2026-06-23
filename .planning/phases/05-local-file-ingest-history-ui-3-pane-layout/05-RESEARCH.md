@@ -638,22 +638,22 @@ export function useJobEvents(jobId: string | null) {
 
 **If this table is empty:** All claims in this research were verified or cited. Five `[ASSUMED]` claims are listed — A1, A3, A4, A5 are low-to-medium risk and covered by fallbacks or are straightforward model changes the planner will include. A2 is the Vite default port.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **HTTP/2 on the dev server.** Does the local uvicorn dev server serve HTTP/2? fetch streaming request bodies require HTTP/2 (Chrome rejects with `ERR_H2_OR_QUIC_REQUIRED` on HTTP/1.1). If uvicorn runs HTTP/1.1 only, the fetch streaming path is unusable and only the XHR fallback works.
    - What we know: uvicorn[standard] supports HTTP/1.1 by default; HTTP/2 requires `uvicorn ... --h11-max-incomplete-event-size` + h2 package. The project runs uvicorn[standard].
    - What's unclear: whether the dev launch config enables HTTP/2.
-   - Recommendation: Implement the XHR `FormData` fallback as the PRIMARY path (it works on HTTP/1.1 and all browsers), and treat fetch streaming as a progressive enhancement. This sidesteps the HTTP/2 question entirely. The back-end serves a multipart fallback route using `python-multipart` + `UploadFile.read()` chunks (memory-safe via SpooledTemporaryFile for the fallback; the PRIMARY memory-safe guarantee is the back-end `request.stream()` route which is HTTP-version-agnostic — it streams the raw body regardless).
+   - RESOLVED: XHR is the PRIMARY (and only) upload path in plan 05-02b Task 2 (`useUpload.ts`). `xhr.send(file)` streams the File/Blob body directly from disk WITHOUT buffering the whole file in JS heap (INGEST-01 memory guarantee preserved on the FE side too), and works on HTTP/1.1 + every browser (Firefox/Safari included — Pitfall 4 moot). The fetch `duplex:"half"` streaming path is NOT used — it gives no upload progress (Pitfall 5) and would deliver indeterminate "Uploading…" on Chrome/Edge, violating locked D-02 which requires PERCENT for every file. The back-end `POST /jobs/upload` route (05-01) reads the raw body via `request.stream()` (HTTP-version-agnostic); the FE XHR path sends the raw octet-stream body + `X-Filename` header (NOT FormData/multipart), matching that contract. No `/jobs/upload-multipart` fallback route is needed.
 
 2. **Per-file upload progress on the fetch path.** fetch streaming gives no reliable byte-level upload progress.
    - What we know: XHR `upload.onprogress` gives real progress; fetch does not.
    - What's unclear: whether the user cares about upload % vs. just "Uploading…".
-   - Recommendation: Show an indeterminate "Uploading…" state on the fetch path; show real % on the XHR fallback. The back-end WS already relays the `ingesting` stage transition.
+   - RESOLVED: The user cares — locked decision D-02 requires "Per-file upload progress is shown for every file (streaming-to-disk percent)." Plan 05-02b Task 2 uses XHR-primary with `xhr.upload.onprogress` so every browser shows real 0->100 percent on the primary path (not a static "Uploading…"). The fetch streaming path (which would force indeterminate progress) is dropped entirely. The `jobs.test.ts` useUpload progress assertion (loaded:500/total:1000 -> 50, loaded:1000/total:1000 -> 100) verifies D-02 is honored. The back-end WS separately relays the `ingesting`/`transcribing` stage percent per Phase 4 D-09.
 
 3. **Idempotency key derivation.** UI-SPEC §1 specifies `[filename]-[size]-[lastmodified]`.
    - What we know: `validate_idempotency_key` restricts charset to `[A-Za-z0-9_-]` and caps at 128 chars. The UI-SPEC format uses `-` separators which is valid.
    - What's unclear: whether long filenames exceed 128 chars.
-   - Recommendation: Hash the derived key (e.g. `SHA-256(filename|size|lastmodified).slice(0,32)`) to stay well under 128 chars. The planner should specify this.
+   - RESOLVED: Plan 05-02a Task 2 implements `idempotencyKey(filename, size, lastModified)` in `web/src/api/client.ts` that hashes `[filename]-[size]-[lastmodified]` via `crypto.subtle` SHA-256 and truncates to 32 hex chars, staying well under the 128-char cap. The 05-02b `useUpload` hook consumes this helper to set the `Idempotency-Key` header on the XHR-primary upload.
 
 ## Environment Availability
 
