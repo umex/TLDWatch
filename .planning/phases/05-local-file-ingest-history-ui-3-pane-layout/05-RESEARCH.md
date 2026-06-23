@@ -45,7 +45,7 @@ D-11 (streaming upload mechanism — chunked streaming body vs. multipart stream
 
 | ID | Description | Research Support |
 |----|-------------|------------------|
-| INGEST-01 | User can submit a local video file via drag-and-drop in the browser | Streaming upload endpoint (`request.stream()` + `aiofiles`) writes `source.<ext>` atomically; browser `fetch` with `ReadableStream` body + `duplex:"half"` (XHR fallback). See Architecture Patterns §1, Code Examples §1-2. |
+| INGEST-01 | User can submit a local video file via drag-and-drop in the browser | Streaming upload endpoint (`request.stream()` + `aiofiles`) writes `source.<ext>` atomically; browser XHR-primary sends the raw octet-stream body + `X-Filename` header (`xhr.send(file)` streams from disk; `xhr.upload.onprogress` gives real 0→100 percent). See Architecture Patterns §1-2, Code Examples §1-2. |
 | JOB-03 | App persists all completed jobs to local history; user can revisit, edit, and re-export | History page consumes `GET /jobs?status=done/failed/cancelled`; re-open loads transcript via new `GET /jobs/{id}/transcript` (D-14). Re-export half is Phase 9 (D-10). See §3. |
 | UI-01 | Main working layout is 3-pane: history (left) \| transcript (middle) \| summary (right) | REFINED per D-04 to history index page (`/`) + 2-pane detail view (`/jobs/:id`). CSS Grid layout. See §2. |
 | UI-02 | No embedded video player; YouTube jobs show an "open in YouTube" link at the current timestamp | No `<video>` element anywhere. The detail view renders transcript + summary placeholder only. See §2. |
@@ -58,14 +58,14 @@ Phase 5 builds the first front-end (a greenfield React SPA in a new `web/` direc
 
 The single most important integration finding is a **race condition between job creation and file streaming**: `app.jobs.service.create_job` inserts the DB row with `status='queued'` and the Phase 4 worker polls every 2s (`run_worker` → `pull_next` selects `WHERE status='queued'`). If the upload route creates the job (status=queued) before the file finishes streaming, the worker picks it up mid-upload, `run_job`'s ingest stage sees no `source.<ext>` yet, and marks the job `failed` with `"source file missing or empty"`. The clean fix is a **pre-queued status** (`'uploading'`) added to the `JobStatus` Literal so the worker's `pull_next` (which selects only `status='queued'`) never sees an uploading job; the upload route enqueues (`status='queued'`) only after `os.replace` lands `source.<ext>` atomically. The `enqueue` helper's `WHERE status IN ('created','queued')` clause must be widened to include `'uploading'`. The generalized `ingested` check in `app.jobs.resume.is_stage_complete` already handles `source.<ext>` in the job dir (Phase 4 D-04), so once the file lands and `source_path` is patched into the manifest, the orchestrator skips the ingest stage and goes straight to transcribing.
 
-**Primary recommendation:** Build the streaming upload as a combined submit+stream route (`POST /jobs/upload`) that reserves the Idempotency-Key, creates the job in `status='uploading'`, streams the raw request body via `request.stream()` + `aiofiles` to `source.<ext>.tmp`, `os.replace` to `source.<ext>`, patches `manifest.source_path`, then calls `enqueue`. The browser uses `fetch` with a `ReadableStream` body (`duplex:"half"`) for Chrome/Edge, with an XHR `FormData` fallback for Firefox/Safari. The FE is Vite 8 + React 19 + TypeScript 6 in a separate `web/` dir, types codegen'd from `/openapi.json` via `openapi-typescript 7`, server state via TanStack Query 5, routing via React Router 8.
+**Primary recommendation:** Build the streaming upload as a combined submit+stream route (`POST /jobs/upload`) that reserves the Idempotency-Key, creates the job in `status='uploading'`, streams the raw request body via `request.stream()` + `aiofiles` to `source.<ext>.tmp`, `os.replace` to `source.<ext>`, patches `manifest.source_path`, then calls `enqueue`. The browser uses XHR as the PRIMARY (and only) upload path: `xhr.send(file)` streams the File/Blob body directly from disk without buffering it in JS heap (raw octet-stream body + `X-Filename` header), and `xhr.upload.onprogress` gives real acked-byte percent 0→100 on every browser (honoring locked D-02). No `fetch`/`duplex:"half"` path, no multipart/FormData fallback, no `/jobs/upload-multipart` route, no python-multipart dependency. The FE is Vite 8 + React 19 + TypeScript 6 in a separate `web/` dir, types codegen'd from `/openapi.json` via `openapi-typescript 7`, server state via TanStack Query 5, routing via React Router 8.
 
 ## Architectural Responsibility Map
 
 | Capability | Primary Tier | Secondary Tier | Rationale |
 |------------|-------------|----------------|-----------|
 | File streaming upload (write source.<ext> to disk) | API / Backend | — | Back-end is the only thing that touches the filesystem (PROJECT.md). Browser streams bytes to a FastAPI route; the route writes to disk. |
-| Upload progress (streaming-to-disk %) | Browser / Client | API / Backend | Browser tracks bytes sent; back-end relays job-stage progress over the existing WS. Per-file upload % is client-computed from the fetch stream. |
+| Upload progress (streaming-to-disk %) | Browser / Client | API / Backend | Browser tracks bytes sent via XHR `xhr.upload.onprogress` (real 0→100 percent); back-end relays job-stage progress over the existing WS. Per-file upload % is client-computed from XHR progress events. |
 | History list (completed jobs) | API / Backend | Browser / Client | `GET /jobs?status=...` is the source; browser renders the list. Back-end owns persistence + ordering. |
 | 2-pane detail layout (transcript \| summary) | Browser / Client | — | Pure presentational; CSS Grid in React. No server state beyond the transcript fetch. |
 | Active-line highlight (scroll-spy) | Browser / Client | — | Pure client-side `IntersectionObserver`; no back-end involvement. |
@@ -107,7 +107,7 @@ The single most important integration finding is a **race condition between job 
 | Instead of | Could Use | Tradeoff |
 |------------|-----------|----------|
 | `request.stream()` (raw body) | `UploadFile` + chunked `read()` | `UploadFile` uses SpooledTemporaryFile (1 MB threshold) and `read(byte_count)` waits for the ENTIRE upload before returning the first chunk (FastAPI issue #3136) — defeats true streaming. `request.stream()` is the only true streaming path. [CITED: github.com/fastapi/fastapi/issues/3136] |
-| fetch ReadableStream body | XHR FormData (per-chunk) | XHR gives real upload progress events and universal browser support; fetch streaming requires Chrome 105+ / HTTP2+ and gives no reliable upload progress (Jake Archibald). Recommend fetch as primary + XHR fallback. [CITED: developer.chrome.com/docs/capabilities/web-apis/fetch-streaming-requests] |
+| fetch ReadableStream body | XHR (raw octet-stream + `X-Filename`) | XHR is the PRIMARY (and only) path: `xhr.send(file)` streams from disk without JS-heap buffering, `xhr.upload.onprogress` gives real 0→100 percent on every browser (honoring D-02), and works on HTTP/1.1 + Firefox/Safari. fetch streaming requires Chrome 105+ / HTTP2+ and gives no reliable upload progress (Pitfall 5) — NOT used. [CITED: developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/upload] |
 | TanStack Query | SWR / native fetch+state | TanStack Query is D-12-locked; provides cache invalidation, retries, background refetch — needed for history list + transcript fetch. |
 | React Router 8 | TanStack Router | D-12 locks React Router; TanStack Router is newer but not the locked decision. |
 
@@ -168,14 +168,14 @@ Browser (web/ — Vite dev :5173)                    Back-end (FastAPI :8000)
                                                     
  ┌──────────────────────────┐                       ┌─────────────────────────┐
  │ History page (/)         │                       │  POST /jobs/upload       │
- │  ┌────────────────────┐  │  fetch(ReadableStream)│  (Idempotency-Key hdr)   │
+ │  ┌────────────────────┐  │  XHR (raw octet-stream)│  (Idempotency-Key hdr)   │
  │  │ Drop zone + overlay│──┼──────────────────────►│  request.stream() →      │
- │  │ (drag + file-pick) │  │  duplex:"half"        │  aiofiles → source.ext.tmp
- │  └────────────────────┘  │                       │  → os.replace → source.ext│
- │  ┌────────────────────┐  │                       │  patch manifest.source_path
- │  │ Active job cards   │◄─┼─── WS /ws/jobs/{id}/events ─┐                 │
- │  │ (WS-driven %, ETA) │  │   (snapshot + live)  │  enqueue → status=queued │
- │  └────────────────────┘  │                       └───────────┬─────────────┘
+ │  │ (drag + file-pick) │  │  X-Filename + xhr.send │  aiofiles → source.ext.tmp
+ │  └────────────────────┘  │  xhr.upload.onprogress │  → os.replace → source.ext│
+ │  ┌────────────────────┐  │  (real 0→100 %)       │  patch manifest.source_path
+ │  │ Active job cards   │◄─┼─── WS /ws/jobs/{id}/events ─┐ enqueue → status=queued │
+ │  │ (WS-driven %, ETA) │  │   (snapshot + live)  │  └───────────┬─────────────┘
+ │  └────────────────────┘  │                                   │
  │  ┌────────────────────┐  │                                   │
  │  │ History list      │◄─┼─── GET /jobs?status=done ─────────┤
  │  │ (completed jobs)  │  │   (newest-first)       ┌───────────▼─────────────┐
@@ -228,7 +228,7 @@ web/                          # NEW — greenfield React SPA (separate codebase)
 │   │   └── DetailPage.tsx    # route /jobs/:id — 2-pane (transcript | summary)
 │   ├── hooks/
 │   │   ├── useScrollSpy.ts   # IntersectionObserver, rootMargin -49%/-49%
-│   │   └── useUpload.ts      # fetch ReadableStream + XHR fallback
+│   │   └── useUpload.ts      # XHR-PRIMARY (raw octet-stream body + X-Filename header)
 │   └── styles.css           # CSS variables from UI-SPEC (spacing, color, type)
 └── scripts/
     └── gen-types.sh          # openapi-typescript http://localhost:8000/openapi.json -o src/api/types.ts
@@ -305,54 +305,43 @@ async def upload_source(
     return response
 ```
 
-### Pattern 2: Browser streaming upload (`fetch` ReadableStream + XHR fallback)
-**What:** The browser streams the file without loading it fully into memory. `fetch` with a `ReadableStream` body works in Chrome/Edge 105+ over HTTP/2. Firefox/Safari do NOT support streaming request bodies — fall back to XHR `FormData` (which uses a temp file, not memory).
-**When to use:** Drop zone + file picker. Feature-detect `duplex:"half"` support.
+### Pattern 2: Browser streaming upload (XHR-primary, raw octet-stream body + `X-Filename` header)
+**What:** The browser streams the file without loading it fully into memory using XHR as the PRIMARY (and only) upload path. `xhr.send(file)` passes the File/Blob handle directly to the browser, which streams bytes from disk without buffering the whole file in JS heap (INGEST-01 memory guarantee preserved on the FE side too). `xhr.upload.onprogress` with `e.lengthComputable` yields the real acked-byte percent, updating 0→100 on every browser (Chrome/Edge/Firefox/Safari), honoring locked D-02.
+**When to use:** Drop zone + file picker. This is the single upload path — no `fetch`/`duplex:"half"` path, no multipart/FormData fallback, no `/jobs/upload-multipart` route, no python-multipart dependency.
+**Why XHR-primary:** fetch streaming request bodies (`duplex:"half"`) require Chrome/Edge 105+ AND HTTP/2+, are unsupported on Firefox/Safari (Pitfall 4), and give no reliable upload progress (Pitfall 5) — which would force an indeterminate "Uploading..." indicator and violate locked D-02 (per-file PERCENT for every file). XHR gives real upload progress events and universal browser support. See Open Questions #1 + #2 (RESOLVED).
 **Example:**
 ```typescript
-// Source: Chrome for Developers — fetch streaming requests
-// [CITED: developer.chrome.com/docs/capabilities/web-apis/fetch-streaming-requests]
-
-// Feature detection (Jake Archibald pattern):
-const supportsRequestStreams = (() => {
-  let duplexAccessed = false;
-  const hasContentType = new Request("", {
-    body: new ReadableStream(), method: "POST",
-    get duplex() { duplexAccessed = true; return "half"; },
-  }).headers.has("Content-Type");
-  return duplexAccessed && !hasContentType;
-})();
+// Source: MDN XMLHttpRequest upload progress + RESEARCH Open Questions #1/#2 (RESOLVED)
+// [CITED: developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/upload]
 
 async function streamFileToJob(file: File, idempotencyKey: string) {
-  const headers = {
-    "Idempotency-Key": idempotencyKey,
-    "X-Filename": file.name,
-    "Content-Type": "application/octet-stream",
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/jobs/upload");
+  // Raw octet-stream body + X-Filename header (NOT FormData/multipart).
+  xhr.setRequestHeader("Idempotency-Key", idempotencyKey);
+  xhr.setRequestHeader("X-Filename", file.name);
+  xhr.setRequestHeader("Content-Type", "application/octet-stream");
+
+  // Real acked-byte percent 0->100 (Pitfall 5 mitigation: real % on XHR, never indeterminate).
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) {
+      onProgress(Math.round((e.loaded / e.total) * 100));
+    }
   };
-  if (supportsRequestStreams) {
-    // Primary: fetch ReadableStream (memory = O(chunk_size), not O(file_size)).
-    const body = new ReadableStream({
-      async pull(controller) {
-        // file.stream() is a ReadableStream of Uint8Array chunks — O(1) slice refs.
-        const reader = file.stream().getReader();
-        const { done, value } = await reader.read();
-        if (done) controller.close();
-        else controller.enqueue(value);
-      },
-    });
-    const res = await fetch("/jobs/upload", {
-      method: "POST", headers, body, duplex: "half",
-    });
-    return res.json();
-  } else {
-    // Fallback: XHR FormData (browser-managed temp file, real progress events).
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch("/jobs/upload-multipart", {
-      method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: fd,
-    });
-    return res.json();
-  }
+
+  return new Promise((resolve, reject) => {
+    xhr.onload = () => {
+      if (xhr.status === 201 || xhr.status === 200) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        reject(new Error(`upload failed: ${xhr.status} ${xhr.statusText}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error("upload failed"));
+    // xhr.send(file) streams the File/Blob body directly from disk WITHOUT
+    // buffering the whole file in JS heap (FE-side INGEST-01 memory guarantee).
+    xhr.send(file);
+  });
 }
 ```
 
@@ -471,14 +460,14 @@ function useScrollSpy(containerRef: Ref<HTMLDivElement>, rowIds: string[]) {
 ### Pitfall 4: fetch streaming request body unsupported on Firefox/Safari
 **What goes wrong:** `fetch` with a `ReadableStream` body rejects on Firefox/Safari with `ERR_H2_OR_QUIC_REQUIRED` or silently buffers.
 **Why it happens:** Streaming request bodies require Chrome/Edge 105+ AND HTTP/2+. Firefox has not implemented it (Bugzilla 1387483, open since 2017).
-**How to avoid:** Feature-detect via the `duplex:"half"` getter pattern (Jake Archibald). Provide an XHR `FormData` fallback (which the back-end serves via a separate multipart route or by accepting multipart on the same route with `python-multipart`).
-**Warning signs:** Upload fails on Firefox; works on Chrome. The project is desktop-browser-only but Firefox is a common desktop browser.
+**How to avoid:** Phase 5 uses XHR as the PRIMARY (and only) upload path — `xhr.send(file)` streams the raw octet-stream body + `X-Filename` header and works on HTTP/1.1 + every browser (Firefox/Safari included), so this pitfall is moot. No `fetch`/`duplex:"half"` path, no multipart/FormData fallback, no python-multipart dependency. See Open Questions #1 (RESOLVED).
+**Warning signs:** N/A — XHR-primary sidesteps this entirely. (If fetch streaming were used, the warning sign would be: upload fails on Firefox; works on Chrome. The project is desktop-browser-only but Firefox is a common desktop browser.)
 
 ### Pitfall 5: No reliable upload progress from fetch streaming
 **What goes wrong:** The UI shows a stuck progress bar because `controller.enqueue`'d bytes are not network-acked bytes.
 **Why it happens:** The fetch streaming spec does not expose acked-byte counts.
-**How to avoid:** For the primary fetch path, show an indeterminate "Uploading…" indicator (not a false %). For the XHR fallback, use `xhr.upload.onprogress` for real byte-level progress. The back-end WS already relays stage-level progress (ingesting 0→100 binary, per-chunk transcribing %).
-**Warning signs:** Progress bar jumps from 0 to 100 with no intermediate updates.
+**How to avoid:** Phase 5 uses XHR as the PRIMARY upload path: `xhr.upload.onprogress` with `e.lengthComputable` yields the real acked-byte percent 0→100 on every browser, honoring locked D-02 (per-file PERCENT for every file). No `fetch`/`duplex:"half"` path is used, so there is no indeterminate "Uploading..." indicator. The back-end WS separately relays stage-level progress (ingesting 0→100 binary, per-chunk transcribing %) per Phase 4 D-09.
+**Warning signs:** N/A — XHR-primary gives real progress. (If fetch streaming were used, the warning sign would be: progress bar jumps from 0 to 100 with no intermediate updates.)
 
 ### Pitfall 6: `react-router-dom` vs `react-router` version mismatch
 **What goes wrong:** Installing `react-router-dom` gets the legacy 7.x track; the current package is `react-router` 8.x.
@@ -664,12 +653,12 @@ export function useJobEvents(jobId: string | null) {
 | Python | Back-end runtime | ✓ | 3.12.5 | — |
 | FastAPI | Back-end framework | ✓ | 0.136.3 | — |
 | aiofiles | Streaming write to disk | ✓ | 25.1.0 | — |
-| python-multipart | XHR multipart fallback | ✓ (0.0.29) | 0.0.29 (latest 0.0.32) | Upgrade to 0.0.32 or keep 0.0.29 |
-| Chrome/Edge 105+ | fetch streaming upload | Likely ✓ (user's desktop) | — | XHR FormData fallback (all browsers) |
-| HTTP/2 (uvicorn) | fetch streaming upload | Unclear | — | XHR fallback; or run uvicorn with h2 |
+| python-multipart | (not required — XHR-primary, no multipart) | N/A | — | Not needed; XHR sends raw octet-stream body, no multipart/FormData path |
+| Chrome/Edge 105+ | (not required — XHR-primary) | N/A | — | XHR works on all browsers; no fetch-streaming dependency |
+| HTTP/2 (uvicorn) | (not required — XHR-primary) | N/A | — | XHR works on HTTP/1.1; no HTTP/2 dependency |
 
 **Missing dependencies with no fallback:** none.
-**Missing dependencies with fallback:** HTTP/2 for fetch streaming → XHR `FormData` fallback (universal browser support). `python-multipart` for the fallback route → already installed (0.0.29).
+**Missing dependencies with fallback:** none — XHR-primary works on HTTP/1.1 + every browser; no fetch-streaming or python-multipart dependency.
 
 ## Validation Architecture
 
@@ -760,7 +749,8 @@ export function useJobEvents(jobId: string | null) {
 - [FastAPI Request Files docs](https://fastapi.tiangolo.com/tutorial/request-files/) — UploadFile/SpooledTemporaryFile behavior.
 - [FastAPI issue #3136](https://github.com/fastapi/fastapi/issues/3136) — `UploadFile.read(byte_count)` waits for full upload; `request.stream()` is the true streaming path.
 - [StackOverflow: FastAPI UploadFile is slow](https://stackoverflow.com/questions/65342833/fastapi-uploadfile-is-slow-compared-to-flask) — `request.stream()` + `aiofiles` pattern.
-- [Chrome for Developers — fetch streaming requests](https://developer.chrome.com/docs/capabilities/web-apis/fetch-streaming-requests) — `duplex:"half"`, browser support, feature detection, progress caveats.
+- [MDN — XMLHttpRequest upload progress](https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/upload) — `xhr.upload.onprogress`, `lengthComputable`, real acked-byte percent.
+- [Chrome for Developers — fetch streaming requests](https://developer.chrome.com/docs/capabilities/web-apis/fetch-streaming-requests) — `duplex:"half"`, browser support, feature detection, progress caveats (now-inapplicable: the fetch path is NOT used; XHR-primary replaces it).
 - [MDN — Intersection Observer API](https://developer.mozilla.org/en-US/docs/Web/API/Intersection_Observer_API) — rootMargin, threshold, scroll-spy patterns.
 
 ### Tertiary (LOW confidence)
@@ -772,7 +762,7 @@ export function useJobEvents(jobId: string | null) {
 - Standard stack: HIGH — all package versions verified on npm/pip registries with 2026 publish dates; back-end stack verified by reading the codebase.
 - Architecture: HIGH — grounded in the actual codebase (FastAPI, the queue/worker poll cadence, the generalized ingested check, atomic writes, WS contract, CORS config); the race-condition finding is verified by reading `pull_next` (selects `status='queued'` only) and `create_job` (inserts `status='queued'`).
 - Pitfalls: HIGH — Pitfall 1 (race), Pitfall 2 (UploadFile buffering), Pitfall 3 (source_path None) are all verified against the actual codebase; Pitfalls 4-6 are cited from official docs.
-- Streaming upload: HIGH — `request.stream()` pattern verified via FastAPI docs + issue #3136 + StackOverflow; browser fetch streaming verified via Chrome for Developers docs.
+- Streaming upload: HIGH — `request.stream()` pattern verified via FastAPI docs + issue #3136 + StackOverflow; XHR-primary upload progress verified via MDN XMLHttpRequest upload docs; the fetch-streaming path is documented as NOT used (Open Questions #1/#2 RESOLVED).
 
 **Research date:** 2026-06-23
 **Valid until:** 2026-07-23 (30 days — stable stack; the FE versions are current as of June 2026)

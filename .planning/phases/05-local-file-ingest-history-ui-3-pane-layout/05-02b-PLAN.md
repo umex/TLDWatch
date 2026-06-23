@@ -2,7 +2,7 @@
 phase: 05-local-file-ingest-history-ui-3-pane-layout
 plan: 02b
 type: execute
-wave: 1
+wave: 2
 depends_on: [05-02a]
 files_modified:
   - web/src/main.tsx

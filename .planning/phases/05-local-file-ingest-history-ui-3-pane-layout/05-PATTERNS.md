@@ -16,7 +16,7 @@ Legend — Match Quality:
 
 | New/Modified File | Role | Data Flow | Closest Analog | Match Quality |
 |-------------------|------|----------|----------------|---------------|
-| `app/api/routes_jobs.py` (ADD `POST /jobs/upload`, `GET /jobs/{id}/transcript`, optional `POST /jobs/upload-multipart`) | route / controller | request-response (streaming body in; JSON out) | `app/api/routes_jobs.py::post_job` + `get_job_by_id` (same file) | exact |
+| `app/api/routes_jobs.py` (ADD `POST /jobs/upload`, `GET /jobs/{id}/transcript`) | route / controller | request-response (streaming body in; JSON out) | `app/api/routes_jobs.py::post_job` + `get_job_by_id` (same file) | exact |
 | `app/jobs/service.py` (ADD `create_upload_job`) | service | CRUD (DB insert + job dir + manifest) | `app/jobs/service.py::create_job` (same file) | exact |
 | `app/models/job.py` (ADD `'uploading'` to `JobStatus` Literal) | model | config (schema literal) | `app/models/job.py::JobStatus` (same file) | exact |
 | `app/jobs/queue.py` (WIDEN `enqueue` WHERE clause to include `'uploading'`) | service | event-driven (worker wake) | `app/jobs/queue.py::enqueue` (same file) | exact |

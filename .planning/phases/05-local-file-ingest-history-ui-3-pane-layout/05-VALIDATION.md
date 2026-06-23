@@ -50,9 +50,9 @@ created: 2026-06-23
 | 05-01-04 | 01 | 1 | INGEST-01 (race) | T-05-03 | Worker does not pick up job mid-upload (`status='uploading'` invisible to `pull_next`) | unit + integration | `pytest tests/test_upload_race.py -x` (slow upload, assert worker idle; after enqueue worker claims) | ❌ W0 | ⬜ pending |
 | 05-01-05 | 01 | 1 | D-14 | — | `GET /jobs/{id}/transcript` returns `Transcript`, 404 when none | unit + integration | `pytest tests/test_transcript_endpoint.py -x` | ❌ W0 | ⬜ pending |
 | 05-01-06 | 01 | 1 | D-11 (idempotency) | — | Re-drop mid-upload collapses to existing job | integration | `pytest tests/test_upload_idempotency.py -x` | ❌ W0 | ⬜ pending |
-| 05-03-01 | 03 | 2 | JOB-03 | — | Completed jobs appear in history list newest-first | integration | `pytest tests/test_history_list.py -x` (create+complete, `GET /jobs?status=done`) | ❌ W0 | ⬜ pending |
-| 05-02-01 | 02 | 1 | UI-01 | — | 3-pane refined to history page + 2-pane detail (transcript + summary) | FE unit | `cd web && npx vitest run src/pages/DetailPage.test.tsx` | ❌ W0 | ⬜ pending |
-| 05-02-02 | 02 | 1 | UI-02 | — | No embedded video player anywhere | FE lint | `grep -r "<video" web/src/` returns no matches | ❌ W0 | ⬜ pending |
+| 05-01-07 | 01 | 2 | JOB-03 | — | Completed jobs appear in history list newest-first | integration | `pytest tests/test_history_list.py -x` (create+complete, `GET /jobs?status=done`) | ❌ W0 | ⬜ pending |
+| 05-02b-01 | 02b | 1 | UI-01 | — | 3-pane refined to history page + 2-pane detail (transcript + summary) | FE unit | `cd web && npx vitest run src/pages/DetailPage.test.tsx` | ❌ W0 | ⬜ pending |
+| 05-02b-02 | 02b | 1 | UI-02 | — | No embedded video player anywhere | FE lint | `grep -r "<video" web/src/` returns no matches | ❌ W0 | ⬜ pending |
 | 05-03-02 | 03 | 2 | UI-03 | — | Active transcript line highlighted on scroll | FE unit (jsdom) | `cd web && npx vitest run src/hooks/useScrollSpy.test.ts` (mock IntersectionObserver, assert `activeId` updates) | ❌ W0 | ⬜ pending |
 | 05-03-03 | 03 | 2 | JOB-03 (re-open) | — | Clicking a completed job loads its transcript; re-export reuses Phase 4 export | integration (FE) + e2e | `cd web && npx vitest run src/api/jobs.test.ts` (`GET /jobs/{id}/transcript` returns Transcript; 404 when none) | ❌ W0 | ⬜ pending |
 
