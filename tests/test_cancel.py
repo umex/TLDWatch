@@ -172,3 +172,138 @@ async def test_cancel_running(tmp_data_dir: Path) -> None:
         assert not transcript_path(s, job_id).exists()
     finally:
         _running.pop(job_id, None)
+
+
+# --- Plan 04-06 (WR-04 gap closure) ----------------------------------------
+#
+# Three API integration tests that drive ``POST /jobs/{id}/cancel`` via the
+# httpx ``client`` fixture (FastAPI app under test). They reuse the
+# ``_settings`` / ``_session_factory`` / ``_make_local_job`` / ``_set_status``
+# helpers above. The ``client`` fixture's lifespan writes
+# ``data_dir=str(tmp_data_dir/"data")`` to settings.json, and
+# ``_settings(tmp_data_dir)`` builds a Settings pointing at the same
+# ``data_dir`` -- so a job created via ``_make_local_job`` is visible to the
+# API route (same SQLite DB). The httpx pattern mirrors
+# ``test_post_jobs_201_response.py``.
+
+
+@pytest.mark.asyncio
+async def test_cancel_queued_via_api(tmp_data_dir: Path, client: "object") -> None:
+    """POST /jobs/{id}/cancel on a queued job -> 200 + cancelled + folder removed.
+
+    WR-04: the route must call ``queue.cancel`` (cooperative path), which for a
+    queued job runs ``cancel_job`` (DB-first + rmtree) + ``_work_signal.set``.
+    """
+    import httpx
+
+    assert isinstance(client, httpx.AsyncClient)
+    s = _settings(tmp_data_dir)
+    sf = await _session_factory(s)
+    job_id = await _make_local_job(s, sf)
+    # Status is ``queued`` from create_job; folder exists.
+    assert job_dir(s, job_id).exists()
+
+    resp = await client.post(f"/jobs/{job_id}/cancel")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "cancelled"
+    # Folder removed by cancel_job (DB-first + rmtree).
+    assert not job_dir(s, job_id).exists()
+    async with sf() as session:
+        row = await get_job(session, job_id)
+    assert row is not None
+    assert row.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_running_via_api(tmp_data_dir: Path, client: "object") -> None:
+    """POST /jobs/{id}/cancel on a running job -> flag set, no partial transcript.
+
+    WR-04 contract: the API does NOT rmtree out from under the orchestrator.
+    ``queue.cancel`` only sets the ``_running`` threading.Event cancel flag for
+    running jobs; the orchestrator's own ``JobCancelled`` path does the
+    ``cancel_job`` + rmtree at the next chunk boundary. This test simulates the
+    orchestrator's path completing (calling ``cancel_job``) to confirm the end
+    state is correct and there is no double-rmtree.
+    """
+    import threading
+
+    import httpx
+    from app.jobs.orchestrator import _running
+
+    assert isinstance(client, httpx.AsyncClient)
+    s = _settings(tmp_data_dir)
+    sf = await _session_factory(s)
+    job_id = await _make_local_job(s, sf)
+    await _set_status(sf, job_id, "transcribing")
+
+    # Register a cancel flag as if run_job were in-flight (mirrors
+    # test_cancel_running's setup).
+    flag = threading.Event()
+    _running[job_id] = flag
+
+    try:
+        resp = await client.post(f"/jobs/{job_id}/cancel")
+
+        assert resp.status_code == 200, resp.text
+        # The cooperative path set the cancel flag (the chunker would observe
+        # it at the next chunk boundary and raise JobCancelled).
+        assert flag.is_set()
+        # No partial transcript.json is left on disk (cancel does not write
+        # one; atomic_write_json fires only after the whole transcribe
+        # returns).
+        assert not transcript_path(s, job_id).exists()
+        # The folder is NOT removed by the API (cooperative -- the orchestrator
+        # does the rmtree); it is still on disk until the orchestrator's
+        # JobCancelled path fires.
+        assert job_dir(s, job_id).exists()
+
+        # Simulate the orchestrator's JobCancelled path completing: the chunker
+        # raised JobCancelled -> the orchestrator's except clause calls
+        # cancel_job. This is the single cancel_job call (no double-rmtree).
+        from app.jobs.cleanup import cancel_job
+
+        async with sf() as session:
+            ok = await cancel_job(session, s, job_id)
+        assert ok is True  # the row was still active -- no double-rmtree conflict
+        async with sf() as session:
+            row = await get_job(session, job_id)
+        assert row is not None
+        assert row.status == "cancelled"
+        assert not job_dir(s, job_id).exists()
+    finally:
+        _running.pop(job_id, None)
+
+
+@pytest.mark.asyncio
+async def test_cancel_terminal_via_api_idempotent(
+    tmp_data_dir: Path, client: "object"
+) -> None:
+    """POST /jobs/{id}/cancel on a terminal job is a no-op returning 200 (D-06).
+
+    A terminal job (``cancelled`` here) returns 200 with the unchanged row --
+    NOT 404 (cancel_job's ``False`` return for terminal rows used to map to
+    404; ``queue.cancel`` returns the row as a no-op). A SECOND cancel is
+    idempotent: 200 with the cancelled row, no error. The folder is untouched
+    (terminal no-op does not rmtree).
+    """
+    import httpx
+
+    assert isinstance(client, httpx.AsyncClient)
+    s = _settings(tmp_data_dir)
+    sf = await _session_factory(s)
+    job_id = await _make_local_job(s, sf)
+    await _set_status(sf, job_id, "cancelled")  # terminal
+    assert job_dir(s, job_id).exists()
+
+    resp1 = await client.post(f"/jobs/{job_id}/cancel")
+    assert resp1.status_code == 200, resp1.text
+    assert resp1.json()["status"] == "cancelled"
+
+    # Second cancel is idempotent (D-06) -- 200, no error, still cancelled.
+    resp2 = await client.post(f"/jobs/{job_id}/cancel")
+    assert resp2.status_code == 200, resp2.text
+    assert resp2.json()["status"] == "cancelled"
+
+    # Terminal no-op does not rmtree the folder.
+    assert job_dir(s, job_id).exists()
