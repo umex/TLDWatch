@@ -99,7 +99,7 @@ The single most important integration finding is a **race condition between job 
 
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
-| python-multipart | 0.0.32 (installed: 0.0.29) | Multipart parsing — ONLY if the XHR fallback uses multipart `FormData` | Install/upgrade if the fallback path needs it; the primary `request.stream()` path does NOT need it [VERIFIED: pip index] |
+| python-multipart | 0.0.32 (installed: 0.0.29) | NOT REQUIRED under XHR-primary (raw octet-stream body) | Not used in Phase 5 — the XHR-primary path sends a raw body + `X-Filename` header and the back-end reads it via `request.stream()`; no multipart parsing occurs. Listed only because it is already installed in pyproject.toml from earlier phases. [VERIFIED: pip index] |
 | aiofiles | 25.1.0 (already installed) | Async streaming write to `source.<ext>.tmp` | Already a dependency; used by `atomic_write_bytes` and the upload route [VERIFIED: pip index] |
 
 ### Alternatives Considered
@@ -121,8 +121,10 @@ npm install -D openapi-typescript
 
 **Installation (Back-end — existing pyproject.toml):**
 ```bash
-# Only if the XHR multipart fallback path is implemented:
-pip install -U python-multipart  # already installed at 0.0.29; 0.0.32 is latest
+# No new back-end dependency required for Phase 5.
+# python-multipart is NOT used (XHR-primary sends a raw octet-stream body;
+# the back-end reads it via request.stream() — no multipart parsing).
+# aiofiles (already installed) is the only streaming-write dependency used.
 ```
 
 **Version verification (run 2026-06-23):**
@@ -416,7 +418,7 @@ function useScrollSpy(containerRef: Ref<HTMLDivElement>, rowIds: string[]) {
 
 | Problem | Don't Build | Use Instead | Why |
 |---------|-------------|-------------|-----|
-| Multipart parsing | Manual boundary parsing | `python-multipart` (if XHR fallback) | Multipart boundary parsing is error-prone; the library is battle-tested. Only needed for the fallback path. |
+| Multipart parsing | Manual boundary parsing | N/A — not used in Phase 5 | XHR-primary sends a raw octet-stream body + `X-Filename` header (no multipart), so no boundary parsing occurs and `python-multipart` is not needed. Listed for completeness: if a multipart path were ever reintroduced, use `python-multipart`. |
 | TS types from OpenAPI | Hand-written interfaces | `openapi-typescript 7` | Codegen stays in sync with the back-end; Phase 1/2 already patched the schema. |
 | Server state cache/invalidation | Manual useEffect + fetch | TanStack Query 5 | Handles refetch-on-focus, dedup, invalidation — needed when a terminal WS event must refresh the history list. |
 | Scroll-spy from scratch | Manual scroll event math | `IntersectionObserver` API | Native, performant, handles rootMargin focal lines; scroll-event math is janky and expensive. |
@@ -619,17 +621,17 @@ export function useJobEvents(jobId: string | null) {
 
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
-| A1 | The user's desktop browser is Chrome or Edge (fetch streaming supported). | Pattern 2, Pitfall 4 | If the user uses Firefox, the XHR fallback path is required. Low risk — fallback is included. |
+| A1 | XHR-primary works on every desktop browser (Chrome, Edge, Firefox, Safari). | Pattern 2, Pitfall 4 | No browser constraint — `xhr.send(file)` + `xhr.upload.onprogress` are universally supported. No fetch/duplex path is used, so the former Chrome/Edge-only assumption is moot. Low risk. |
 | A2 | The Vite dev server runs on :5173 (matching the CORS config in `app/main.py`). | Standard Stack | If the port is different, CORS must be updated. Low risk — :5173 is the Vite default. |
 | A3 | `create_upload_job` with `status='uploading'` requires adding `'uploading'` to the `JobStatus` Literal so `JobResponse` strict validation passes. | Pattern 1, Pitfall 1 | If not added, `_row_to_response` fails on the new status. Medium risk — but it is a straightforward model change. |
 | A4 | The upload route should patch the manifest directly (not call `update_stage("ingested")`) to avoid setting `status="ingesting"` which blocks `enqueue`. | Pitfall 3 | If `update_stage("ingested")` is called instead, `enqueue`'s `WHERE status IN ('created','queued')` won't match and the job never gets queued. Medium risk — documented clearly above. |
-| A5 | HTTP/2 is available between the browser and the back-end (uvicorn). | Pattern 2 | fetch streaming requires HTTP/2. uvicorn supports HTTP/2 via `--h11-protocol`/h2. If HTTP/1.1 only, the XHR fallback is used. Low risk — fallback covers it. |
+| A5 | HTTP/1.1 is sufficient (XHR-primary does not require HTTP/2). | Pattern 2 | XHR upload works over HTTP/1.1 on every browser; no HTTP/2 dependency. The former fetch-streaming HTTP/2 requirement is moot because fetch is not used. Low risk. |
 
 **If this table is empty:** All claims in this research were verified or cited. Five `[ASSUMED]` claims are listed — A1, A3, A4, A5 are low-to-medium risk and covered by fallbacks or are straightforward model changes the planner will include. A2 is the Vite default port.
 
 ## Open Questions (RESOLVED)
 
-1. **HTTP/2 on the dev server.** Does the local uvicorn dev server serve HTTP/2? fetch streaming request bodies require HTTP/2 (Chrome rejects with `ERR_H2_OR_QUIC_REQUIRED` on HTTP/1.1). If uvicorn runs HTTP/1.1 only, the fetch streaming path is unusable and only the XHR fallback works.
+1. **HTTP/2 on the dev server (historically considered for fetch streaming).** fetch streaming request bodies would have required HTTP/2 (Chrome rejects with `ERR_H2_OR_QUIC_REQUIRED` on HTTP/1.1). This is now moot — XHR-primary is adopted and works on HTTP/1.1 on every browser, so no HTTP/2 dev-server config is needed.
    - What we know: uvicorn[standard] supports HTTP/1.1 by default; HTTP/2 requires `uvicorn ... --h11-max-incomplete-event-size` + h2 package. The project runs uvicorn[standard].
    - What's unclear: whether the dev launch config enables HTTP/2.
    - RESOLVED: XHR is the PRIMARY (and only) upload path in plan 05-02b Task 2 (`useUpload.ts`). `xhr.send(file)` streams the File/Blob body directly from disk WITHOUT buffering the whole file in JS heap (INGEST-01 memory guarantee preserved on the FE side too), and works on HTTP/1.1 + every browser (Firefox/Safari included — Pitfall 4 moot). The fetch `duplex:"half"` streaming path is NOT used — it gives no upload progress (Pitfall 5) and would deliver indeterminate "Uploading…" on Chrome/Edge, violating locked D-02 which requires PERCENT for every file. The back-end `POST /jobs/upload` route (05-01) reads the raw body via `request.stream()` (HTTP-version-agnostic); the FE XHR path sends the raw octet-stream body + `X-Filename` header (NOT FormData/multipart), matching that contract. No `/jobs/upload-multipart` fallback route is needed.

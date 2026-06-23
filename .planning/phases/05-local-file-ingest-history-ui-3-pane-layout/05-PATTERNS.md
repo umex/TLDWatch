@@ -20,7 +20,7 @@ Legend — Match Quality:
 | `app/jobs/service.py` (ADD `create_upload_job`) | service | CRUD (DB insert + job dir + manifest) | `app/jobs/service.py::create_job` (same file) | exact |
 | `app/models/job.py` (ADD `'uploading'` to `JobStatus` Literal) | model | config (schema literal) | `app/models/job.py::JobStatus` (same file) | exact |
 | `app/jobs/queue.py` (WIDEN `enqueue` WHERE clause to include `'uploading'`) | service | event-driven (worker wake) | `app/jobs/queue.py::enqueue` (same file) | exact |
-| `app/main.py` (verify CORS already configured — no change expected; add multipart dep if fallback route ships) | config | request-response | `app/main.py::CORSMiddleware` block (same file) | exact |
+| `app/main.py` (verify CORS already configured — no change expected; no multipart dependency needed under XHR-primary) | config | request-response | `app/main.py::CORSMiddleware` block (same file) | exact |
 
 ### Back-end tests (new files under `tests/`)
 
@@ -54,7 +54,7 @@ Legend — Match Quality:
 | `web/src/pages/HistoryPage.tsx` | page/route | composite (drop + active cards + history) | UI-SPEC §5 (route `/`) + RESEARCH §Pattern 3 | none (UI-SPEC) |
 | `web/src/pages/DetailPage.tsx` | page/route | composite (2-pane transcript \| summary) | UI-SPEC §5 (route `/jobs/:id`) + RESEARCH §Example 5 (CSS Grid) | none (UI-SPEC) |
 | `web/src/hooks/useScrollSpy.ts` | hook | event-driven (IntersectionObserver) | RESEARCH §Pattern 4 + UI-SPEC §3 (`rootMargin: "-49% 0px -49% 0px"`) | none (RESEARCH example) |
-| `web/src/hooks/useUpload.ts` | hook | file-I/O (fetch ReadableStream + XHR fallback) | RESEARCH §Pattern 2 (feature-detect `duplex:"half"`) | none (RESEARCH example) |
+| `web/src/hooks/useUpload.ts` | hook | file-I/O (XHR-primary: `xhr.send(file)` raw octet-stream + `X-Filename` header, `xhr.upload.onprogress` 0→100%) | RESEARCH §Pattern 2 (XHR-primary, raw octet-stream) | none (RESEARCH example) |
 | `web/src/styles.css` | config | static (CSS variables + grid) | UI-SPEC §Design System (spacing scale, color, typography) + RESEARCH §Example 5 | none (UI-SPEC) |
 | `web/scripts/gen-types.sh` | utility | build (openapi-typescript codegen) | `openapi-typescript` CLI usage | none (tool default) |
 | `web/vitest.config.ts` | config | test (Vitest jsdom env) | Vite+Vitest default config | none (framework default) |
@@ -339,7 +339,7 @@ The entire `web/` tree is greenfield. There is NO existing React/TS/JS code in t
    - §5 Routes → `App.tsx` (`/`, `/jobs/:id`), `HistoryPage.tsx`, `DetailPage.tsx`
    - §6 States → `SummaryPane.tsx` ("Summaries will appear here once summarization is enabled"), `ExportStub.tsx` (disabled "Export (Coming Soon)"), empty-state copy
 3. **RESEARCH code examples** — `05-RESEARCH.md` has ready-to-paste excerpts:
-   - §Pattern 2 → `useUpload.ts` (fetch `ReadableStream` + `duplex:"half"` feature-detect + XHR `FormData` fallback)
+   - §Pattern 2 → `useUpload.ts` (XHR-primary: `xhr.send(file)` raw octet-stream body + `X-Filename` header + `xhr.upload.onprogress` 0→100%; no fetch/duplex, no multipart)
    - §Pattern 3 → `api/jobs.ts` (`useQuery({queryKey: ["jobs","done"], queryFn: ...})`)
    - §Pattern 4 → `useScrollSpy.ts` (full `IntersectionObserver` + pixel-offset fallback)
    - §Example 4 → `api/ws.ts` (`useJobEvents(jobId)` native WebSocket hook)
@@ -357,7 +357,7 @@ The planner should treat the FE files as "follow the UI-SPEC + RESEARCH excerpts
 
 ### Strict-in / lax-out at the API boundary (D-15)
 **Source:** `app/models/job.py::CreateJobRequest` (lines 38-41, `ConfigDict(strict=True, extra="forbid")`), `JobResponse` (lines 114, `strict=True, extra="forbid"` — but the lax output is the `datetime` iso serialization, not a relaxed schema).
-**Apply to:** the new `POST /jobs/upload` route — if a request body model is added (e.g. for the multipart fallback), it MUST be `strict=True, extra="forbid"`. The `JobResponse` output stays as-is; the `Transcript` output is already lax (`app/models/transcript.py` — no `strict=True`, `speaker`/`confidence` optional).
+**Apply to:** the new `POST /jobs/upload` route — it takes NO request body model (the file is read via `request.stream()` and the filename via the `X-Filename` header, per D-15 strict-in at the boundary). If a request body model were ever added, it MUST be `strict=True, extra="forbid"`. The `JobResponse` output stays as-is; the `Transcript` output is already lax (`app/models/transcript.py` — no `strict=True`, `speaker`/`confidence` optional).
 
 ### Atomic writes (Phase 1 D-04)
 **Source:** `app/storage/atomic.py::atomic_write_bytes` (lines 31-58) — tmp + `aiofiles` + `fsync` + `retry_windows(os.replace)` + `except BaseException: os.unlink(tmp)`.
