@@ -181,11 +181,17 @@ async def cancel(job_id: str, session, settings: Settings) -> dict:
     ``_TERMINAL_STATUSES`` gate (T-04-04) is checked FIRST so a cancel
     cannot race with a terminal commit and flip a done job back.
 
-    - ``queued``: ``cancel_job`` (DB-first + rmtree via cleanup) +
-      ``_work_signal.set()`` (in case the worker just pulled it; the
-      atomic claim in ``pull_next`` means if the worker already claimed
-      it the status would be ``'starting'`` not ``'queued'``, so this path
-      is safe -- the worker cannot double-run a cancelled queued job).
+    - ``queued``: a conditional ``UPDATE ... WHERE status='queued'``
+      flips the row to ``cancelled``; on success ``cancel_job`` does the
+      rmtree and ``_work_signal.set()`` wakes the worker. If the
+      conditional UPDATE gets ``rowcount == 0`` the worker's ``pull_next``
+      atomic claim won the race between our SELECT and the UPDATE (status
+      is now ``'starting'``); we fall through to the active-cancel path
+      so the orchestrator's chunker raises ``JobCancelled`` at the next
+      chunk boundary (WR-01 -- an unconditional UPDATE here would flip
+      the claimed row to ``'cancelled'`` out from under the running
+      worker, and the orchestrator's next ``update_stage`` would
+      overwrite it, silently losing the cancel).
     - ``starting`` / ``ingesting`` / ``transcribing``: import ``_running``
       from :mod:`app.jobs.orchestrator`; look up the ``threading.Event``
       cancel flag and ``.set()`` it. The 04-01 orchestrator's chunker
@@ -213,13 +219,43 @@ async def cancel(job_id: str, session, settings: Settings) -> dict:
         return {"status": status, "id": job_id}
 
     if status == "queued":
-        # DB-first cancel (marks cancelled + rmtree) + wake the worker in
-        # case it is about to poll (the atomic claim prevents a race where
-        # the worker already claimed it -- that would have flipped status
-        # to 'starting', so this queued path is safe).
-        await cancel_job(session, settings, job_id)
-        _work_signal.set()
-        return {"status": "cancelled", "id": job_id}
+        # WR-01: conditionally flip ONLY if the row is STILL queued. If
+        # the worker's pull_next atomic claim won the race between our
+        # initial SELECT and this UPDATE (status is now 'starting'),
+        # ``rowcount == 0`` -- fall through to the active-cancel path
+        # below so the orchestrator's chunker raises JobCancelled at the
+        # next chunk boundary (D-06 cooperative cancel). An UNCONDITIONAL
+        # UPDATE here would flip the claimed row to 'cancelled' out from
+        # under the running worker, and the orchestrator's next
+        # update_stage would overwrite it -- silently losing the cancel.
+        claim = await session.execute(
+            text(
+                "UPDATE jobs SET status = 'cancelled', updated_at = :now "
+                "WHERE id = :id AND status = 'queued'"
+            ),
+            {"now": utcnow_iso(), "id": job_id},
+        )
+        await session.commit()
+        if claim.rowcount == 1:
+            # Won the race -- row is cancelled. cancel_job does the
+            # rmtree (its UPDATE on the now-'cancelled' row is an
+            # idempotent no-op; the row is terminal so the worker's
+            # pull_next cannot reclaim it). Wake the worker in case it
+            # is about to poll.
+            await cancel_job(session, settings, job_id)
+            _work_signal.set()
+            return {"status": "cancelled", "id": job_id}
+        # Lost the race -- the worker claimed the row (status now
+        # 'starting' or progressed). Fall through to the active-cancel
+        # path below so the orchestrator's chunker raises JobCancelled
+        # at the next chunk boundary (D-06 cooperative cancel). Do NOT
+        # rmtree here -- the orchestrator's JobCancelled path owns the
+        # rmtree.
+        _log.info(
+            "cancel: queued job %s was claimed mid-cancel; routing to "
+            "active path",
+            job_id,
+        )
 
     # Active: starting / ingesting / transcribing.
     # Import the 04-01 _running registry and set the cancel flag; the
