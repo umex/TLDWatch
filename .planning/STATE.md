@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: context exhaustion at 81% (2026-06-22)
-last_updated: "2026-06-23T08:06:12.449Z"
-last_activity: 2026-06-22 -- Plan 04-02 complete (queue + sweep + cancel + watchdog)
+stopped_at: Completed 04-04-PLAN.md (CR-03 gap closure)
+last_updated: "2026-06-23T08:27:57.481Z"
+last_activity: 2026-06-23 -- Phase 04 execution started
 progress:
   total_phases: 10
-  completed_phases: 4
-  total_plans: 15
-  completed_plans: 15
-  percent: 40
+  completed_phases: 3
+  total_plans: 18
+  completed_plans: 16
+  percent: 30
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 04 (job-orchestrator-persistent-queue-websocket-progress) — EXECUTING
-Plan: 3 of 3
-Status: Ready to execute 04-03
-Last activity: 2026-06-22 -- Plan 04-02 complete (queue + sweep + cancel + watchdog)
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-06-23 -- Phase 04 execution started
 
 Progress: [███░░░░░░░] 30%
 
@@ -61,6 +61,7 @@ Progress: [███░░░░░░░] 30%
 | Phase 04 P01 | 23m | 4 tasks | 13 files |
 | Phase 04 P02 | 23m | 4 tasks | 7 files |
 | Phase 04 P03 | 67m | 3 tasks | 11 files |
+| Phase 04 P04 | 6m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,7 @@ Recent decisions affecting current work:
 - [Phase ?]: 03-03: Standalone transcribe CLI + [project.scripts] entry declared HERE (Codex HIGH); --device auto resolves CUDA/CPU from settings via device_for (SC-5); _bootstrap_settings + _get_or_configure_manager close the PATTERNS CLI gap; finally-block adapter.unload(); raw RuntimeError preserved to stderr; SC-5 desktop CPU half VERIFIED (3.09GB snapshot, 20 segs, en), laptop CUDA half DEFERRED; cross-phase manager fix 051b0302 (file=None repos -> snapshot_download) surfaced by SC-5
 - [Phase 04]: Plan 04-01: JobCancelled in neutral app/jobs/errors.py (Fix 5); cancel_flag is threading.Event (NOT asyncio.Event); run_job re-raises non-cancel exceptions after mark_failed but swallows JobCancelled; heartbeat via progress.json mtime + _STAGE_FILE_NAMES inclusion (no os.utime on job_dir).
 - [Phase 04]: Plan 04-02: pull_next uses conditional UPDATE WHERE status='queued' + rowcount check (Fix 6 atomic claim); run_worker uses hybrid Event+poll wakeup asyncio.wait_for(_work_signal.wait(), timeout=2.0) (Fix 1); boot sweep mark_interrupted_failed writes manifest via atomic_write_json (update_stage maps 'failed'->'queued' incorrectly so the documented fallback is used); cancel running path sets _running flag only (no double cancel_job, T-04-06); watchdog excludes queued (Codex MEDIUM); 'starting' added to JobStatus Literal (transient claim state); lifespan teardown cancels worker+watchdog before engine.dispose; app.state.bus/settings/session_factory established (Fix 7-partial).
+- [Phase 04]: CR-03 closed (plan 04-04): additive resume_stage == 'done' branch in run_job advances crash-window jobs (transcript.json on disk, current_stage != 'done') to done on re-entry; happy path and no-op path unchanged; full 39-test phase suite green
 
 ### Pending Todos
 
@@ -116,9 +118,9 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-23T04:47:17.793Z
-Stopped at: context exhaustion at 81% (2026-06-22)
-Resume file: .planning/phases/04-job-orchestrator-persistent-queue-websocket-progress/04-CONTEXT.md
+Last session: 2026-06-23T08:27:57.473Z
+Stopped at: Completed 04-04-PLAN.md (CR-03 gap closure)
+Resume file: None
 
 ### Gap-closure wave (01-04) — closed
 
