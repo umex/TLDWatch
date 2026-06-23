@@ -281,6 +281,21 @@ async def run_job(
                 await update_stage(settings, session, job_id, "done")
             _publish({"type": "done"})
 
+        if resume_stage == "done":
+            # CR-03 fix: a crash between update_stage("transcribed") and
+            # update_stage("done") leaves transcript.json on disk (file
+            # truth says transcribed is complete) but manifest.current_stage
+            # != "done". infer_resume_point returns "done" in this window;
+            # without this branch run_job would fall through both `if not
+            # skip_*` blocks and exit without advancing -- the job stuck in
+            # "transcribing" forever. Advance the derived done transition
+            # here and publish the done event (same event the happy path
+            # publishes at line 282).
+            async with session_factory() as session:
+                await update_stage(settings, session, job_id, "done")
+            _publish({"type": "done"})
+            _log.info("run_job %s: advanced to done via resume", job_id)
+
     except JobCancelled:
         _log.info("run_job %s: cancelled at chunk boundary", job_id)
         async with session_factory() as session:
