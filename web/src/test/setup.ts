@@ -18,6 +18,7 @@ import '@testing-library/react'
 type IOCallback = (entries: IntersectionObserverEntry[]) => void
 
 class MockIntersectionObserver {
+  static instances: MockIntersectionObserver[] = []
   callback: IOCallback
   elements: Set<Element> = new Set()
   readonly root: Element | Document | null = null
@@ -26,6 +27,7 @@ class MockIntersectionObserver {
   scrollMargin: string = '0px'
   constructor(cb: IOCallback, _options?: IntersectionObserverInit) {
     this.callback = cb
+    MockIntersectionObserver.instances.push(this)
   }
   observe(target: Element): void {
     this.elements.add(target)
@@ -271,6 +273,7 @@ if (typeof globalThis.TextEncoder === 'undefined') {
 // --- Reset mocks + instance trackers between tests ----------------------------
 afterEach(() => {
   vi.restoreAllMocks()
+  MockIntersectionObserver.instances.length = 0
   MockWebSocket.instances.length = 0
   MockXMLHttpRequest.instances.length = 0
 })
