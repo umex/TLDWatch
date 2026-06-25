@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 5 UI-SPEC approved
-last_updated: "2026-06-25T03:45:25.108Z"
-last_activity: 2026-06-23 -- Phase 05 plan 01 complete
+stopped_at: Phase 5 plan 02b complete
+last_updated: "2026-06-25T05:59:00.000Z"
+last_activity: 2026-06-25 -- Phase 05 plan 02b complete
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 22
-  completed_plans: 20
-  percent: 40
+  completed_plans: 21
+  percent: 45
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 05 (local-file-ingest-history-ui-3-pane-layout) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
-Last activity: 2026-06-23 -- Phase 05 plan 01 complete
+Last activity: 2026-06-25 -- Phase 05 plan 02b complete
 
-Progress: [████████████████████] 19/22 plans (86% of milestone plans) — 4/10 phases complete
+Progress: [█████████████████████] 21/22 plans (95% of milestone plans) — 4/10 phases complete
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [████████████████████] 19/22 p
 | Phase 04 P06 | 8m | 2 tasks | 2 files |
 | Phase 05 P01 | 32m | 3 tasks | 11 files |
 | Phase 05 P02a | resumed | - tasks | - files |
+| Phase 05 P02b | 8m | 2 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,7 @@ Recent decisions affecting current work:
 - [Phase 04]: Plan 04-06 (WR-04): post_cancel rewired to queue.cancel (cooperative path) instead of cleanup.cancel_job; {} -> 404, terminal-no-op 200 (D-06 idempotent), running sets _running flag (orchestrator's JobCancelled path does cancel_job + rmtree); full 44-test phase suite green
 - [Phase 05]: Plan 05-01: POST /jobs/upload streams raw body via request.stream() + aiofiles to .tmp_source.<ext> -> fsync -> retry_windows(os.replace) (NOT the SpooledTemporaryFile-backed file-upload helper per Pitfall 2 / FastAPI #3136); validates ext first (T-05-01), reuses resolve_or_create + create_upload_job (Phase 4 D-07), patches manifest.source_path directly (Pitfall 3 -- NOT update_stage which would block enqueue), enqueues after rename. JobStatus gains 'uploading' (pre-queued, invisible to pull_next which selects only 'queued'); enqueue WHERE widened to ('uploading','created','queued'). GET /jobs/{id}/transcript returns Transcript (D-14), 404 when none, 400 invalid id. Response refreshed via get_job after enqueue so caller sees status='queued' (Rule 1 fix). 7 new test files (12 test functions); full back-end suite 278 passed, 0 skipped.
 - [Phase ?]: Plan 05-02a (FE scaffold + API/WS layer): closed out manually after executor hit HTTP 429 mid-Task-2 (files written, smoke.test.ts line-2 corrupted, SUMMARY missing). Fixed corruption; added missing @testing-library/dom ^10 peer dep (installed --legacy-peer-deps); removed stray root .openapi-snapshot.json scratch. tsc clean, vitest 6/6, vite build ok.
+- [Phase 05]: Plan 05-02b (FE shell + ingest UI): createBrowserRouter routes / + /jobs/:id (react-router 8, NOT react-router-dom); 2-pane .detail-layout (transcript 60% | summary 40%) with no embedded media player (UI-02); TranscriptRow CSS Grid 64px|80px|1fr with [mm:ss] timestamp + empty speaker gutter + active prop for 05-03 scroll-spy; SummaryPane exact D-08 placeholder; ExportStub disabled D-10 stub. useUpload is XHR-PRIMARY (D-02 locked): new XMLHttpRequest -> POST /jobs/upload with Idempotency-Key (idempotencyKey SHA-256->32 hex), X-Filename, octet-stream; xhr.upload.onprogress drives real 0->100 percent; xhr.send(file) streams from disk without JS-heap buffering (FE INGEST-01); NO fetch/duplex, NO FormData (raw-body 05-01 contract). DropZone = full-window overlay + dedicated .drop-zone (D-01) + multi-file FIFO queue. ActiveJobCard = useJobEvents WS (D-03) with queued/ingesting/transcribing lifecycle + ETA gate (>=2 chunks) + terminal fade-out + invalidateJobs refetch. HistoryList = three useJobs(terminal) merged newest-first (D-05) + No Transcripts Yet empty state. HistoryRow click -> /jobs/:id. 14 FE tests green (6 smoke + 5 DetailPage + 3 jobs incl. D-02 0->50->100 progress assertion). tsc clean, vite build ok. Strict grep gates (no <video / dangerouslySetInnerHTML / FormData / duplex literals in source) required rewording behavior-rationale comments.
 
 ### Pending Todos
 
@@ -127,9 +129,9 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-23T17:15:42.000Z
-Stopped at: Phase 5 UI-SPEC approved
-Resume file: .planning/phases/05-local-file-ingest-history-ui-3-pane-layout/05-UI-SPEC.md
+Last session: 2026-06-25T05:59:00.000Z
+Stopped at: Phase 5 plan 02b complete
+Resume file: .planning/phases/05-local-file-ingest-history-ui-3-pane-layout/05-02b-SUMMARY.md
 
 ### Gap-closure wave (01-04) — closed
 

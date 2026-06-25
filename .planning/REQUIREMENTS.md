@@ -9,7 +9,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Ingest
 
-- [ ] **INGEST-01**: User can submit a local video file via drag-and-drop in the browser
+- [x] **INGEST-01**: User can submit a local video file via drag-and-drop in the browser
 - [ ] **INGEST-02**: User can submit a single YouTube video URL
 - [ ] **INGEST-03**: User can submit a YouTube playlist URL
 - [ ] **INGEST-04**: App downloads YouTube audio locally and processes it from scratch (no reliance on YouTube's auto-captions)
@@ -55,8 +55,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### UI Layout
 
-- [ ] **UI-01**: Main working layout is 3-pane: history (left) | transcript (middle) | summary (right)
-- [ ] **UI-02**: No embedded video player; YouTube jobs show a "open in YouTube" link at the current timestamp
+- [x] **UI-01**: Main working layout is 3-pane: history (left) | transcript (middle) | summary (right)
+- [x] **UI-02**: No embedded video player; YouTube jobs show a "open in YouTube" link at the current timestamp
 - [ ] **UI-03**: Active transcript line is highlighted based on current scroll position (for local files only)
 
 ### Hardware & Models
@@ -125,7 +125,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INGEST-01 | Phase 5 | Pending |
+| INGEST-01 | Phase 5 | Complete |
 | INGEST-02 | Phase 6 | Pending |
 | INGEST-03 | Phase 6 | Pending |
 | INGEST-04 | Phase 6 | Pending |
@@ -152,8 +152,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXPORT-01 | Phase 9 | Pending |
 | EXPORT-02 | Phase 9 | Pending |
 | EXPORT-03 | Phase 9 | Pending |
-| UI-01 | Phase 5 | Pending |
-| UI-02 | Phase 5 | Pending |
+| UI-01 | Phase 5 | Complete |
+| UI-02 | Phase 5 | Complete |
 | UI-03 | Phase 5 | Pending |
 | HW-01 | Phase 1 | Pending |
 | HW-02 | Phase 2 | Pending (lifecycle in 02-02; actual GPU inference in Phase 3/7/8) |

@@ -169,7 +169,7 @@ Plans:
 
 **Wave 2** (blocked on Wave 1 completion; FE shell depends on FE scaffold 05-02a)
 
-- [ ] 05-02b-PLAN.md — App shell + routes + 2-pane detail + drop zone + active-job cards + XHR-PRIMARY useUpload (real 0->100 percent per locked D-02) + history list/row (autonomous; depends on 05-02a; INGEST-01, UI-01, UI-02)
+- [x] 05-02b-PLAN.md — App shell + routes + 2-pane detail + drop zone + active-job cards + XHR-PRIMARY useUpload (real 0->100 percent per locked D-02) + history list/row (autonomous; depends on 05-02a; INGEST-01, UI-01, UI-02)
 
 **Wave 3** (blocked on Wave 1 + Wave 2 completion; integration stitches 05-01 + 05-02b)
 
