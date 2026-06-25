@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 05 plan 01 complete
-last_updated: "2026-06-23T21:05:38.000Z"
+stopped_at: Phase 5 UI-SPEC approved
+last_updated: "2026-06-25T03:45:25.108Z"
 last_activity: 2026-06-23 -- Phase 05 plan 01 complete
 progress:
   total_phases: 10
   completed_phases: 4
   total_plans: 22
-  completed_plans: 19
-  percent: 43
+  completed_plans: 20
+  percent: 40
 ---
 
 # Project State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 05 (local-file-ingest-history-ui-3-pane-layout) — EXECUTING
-Plan: 2 of 4
-Status: Executing Phase 05 (plan 01 complete)
+Plan: 3 of 4
+Status: Ready to execute
 Last activity: 2026-06-23 -- Phase 05 plan 01 complete
 
 Progress: [████████████████████] 19/22 plans (86% of milestone plans) — 4/10 phases complete
@@ -66,6 +66,7 @@ Progress: [████████████████████] 19/22 p
 | Phase 04 P05 | 10m | 2 tasks | 3 files |
 | Phase 04 P06 | 8m | 2 tasks | 2 files |
 | Phase 05 P01 | 32m | 3 tasks | 11 files |
+| Phase 05 P02a | resumed | - tasks | - files |
 
 ## Accumulated Context
 
@@ -95,6 +96,7 @@ Recent decisions affecting current work:
 - [Phase 04]: CR-01 + CR-02 closed (plan 04-05): boot-sweep (mark_interrupted_failed) + watchdog (run_watchdog) SELECT widened to `status IN ('starting','ingesting','transcribing')` so a crashed-in-claim `starting` job is recovered on the next boot (CR-01); mark_interrupted_failed consults infer_resume_point per swept job and advances to done via update_stage('done') when resume_point is None or 'done' (transcript.json on disk, current_stage='transcribed', DB status='transcribing'), preserving the user's completed transcription (CR-02); a `starting` job is correctly FAILED (infer_resume_point returns 'ingested', not None/'done'); filter-widening approach chosen over zero-width 'starting' window to avoid changing 04-01's orchestrator wiring; full 41-test phase suite green (39 prior + 2 new)
 - [Phase 04]: Plan 04-06 (WR-04): post_cancel rewired to queue.cancel (cooperative path) instead of cleanup.cancel_job; {} -> 404, terminal-no-op 200 (D-06 idempotent), running sets _running flag (orchestrator's JobCancelled path does cancel_job + rmtree); full 44-test phase suite green
 - [Phase 05]: Plan 05-01: POST /jobs/upload streams raw body via request.stream() + aiofiles to .tmp_source.<ext> -> fsync -> retry_windows(os.replace) (NOT the SpooledTemporaryFile-backed file-upload helper per Pitfall 2 / FastAPI #3136); validates ext first (T-05-01), reuses resolve_or_create + create_upload_job (Phase 4 D-07), patches manifest.source_path directly (Pitfall 3 -- NOT update_stage which would block enqueue), enqueues after rename. JobStatus gains 'uploading' (pre-queued, invisible to pull_next which selects only 'queued'); enqueue WHERE widened to ('uploading','created','queued'). GET /jobs/{id}/transcript returns Transcript (D-14), 404 when none, 400 invalid id. Response refreshed via get_job after enqueue so caller sees status='queued' (Rule 1 fix). 7 new test files (12 test functions); full back-end suite 278 passed, 0 skipped.
+- [Phase ?]: Plan 05-02a (FE scaffold + API/WS layer): closed out manually after executor hit HTTP 429 mid-Task-2 (files written, smoke.test.ts line-2 corrupted, SUMMARY missing). Fixed corruption; added missing @testing-library/dom ^10 peer dep (installed --legacy-peer-deps); removed stray root .openapi-snapshot.json scratch. tsc clean, vitest 6/6, vite build ok.
 
 ### Pending Todos
 

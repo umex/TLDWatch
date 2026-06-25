@@ -165,7 +165,7 @@ Plans:
 **Wave 1** (back-end upload + FE scaffold run in parallel; zero cross-plan file overlap)
 
 - [x] 05-01-PLAN.md — Streaming upload endpoint (POST /jobs/upload, raw body via request.stream()) + transcript read endpoint (GET /jobs/{id}/transcript) + pre-queued 'uploading' status race-fix (autonomous; INGEST-01, JOB-03)
-- [ ] 05-02a-PLAN.md — Greenfield React scaffold + Vitest infra + API layer (client.ts idempotencyKey SHA-256, ws.ts, jobs.ts hooks) + codegen types + CSS Design System (autonomous; INGEST-01, UI-01, UI-02)
+- [x] 05-02a-PLAN.md — Greenfield React scaffold + Vitest infra + API layer (client.ts idempotencyKey SHA-256, ws.ts, jobs.ts hooks) + codegen types + CSS Design System (autonomous; INGEST-01, UI-01, UI-02)
 
 **Wave 2** (blocked on Wave 1 completion; FE shell depends on FE scaffold 05-02a)
 
@@ -296,7 +296,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. GPU Backend Detection + Model Manager | 5/5 | Complete    | 2026-06-19 |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 3/3 | Complete    | 2026-06-22 |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 6/6 | Complete    | 2026-06-23 |
-| 5. Local File Ingest + History UI + 3-Pane Layout | 0/3 | Not started | - |
+| 5. Local File Ingest + History UI + 3-Pane Layout | 2/4 | In Progress|  |
 | 6. YouTube Ingest + Sequential Playlist Queue | 0/3 | Not started | - |
 | 7. Diarization Adapter + Speaker Rename Cluster | 0/3 | Not started | - |
 | 8. LLM Adapter + Four Summary Templates + Multi-Select | 0/3 | Not started | - |
