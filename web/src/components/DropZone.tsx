@@ -91,6 +91,17 @@ export default function DropZone({ onJobCreated }: DropZoneProps) {
       {overlayVisible && (
         <div
           data-testid="drop-overlay"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            // The overlay covers the whole viewport during a drag, so it is
+            // the actual drop target -- wire it to the same upload flow as
+            // the dedicated .drop-zone (D-01 "two entry points"). The
+            // window-level onDrop (preventDefault + hide) still fires via
+            // bubbling, but only THIS handler touches the files, so there
+            // is no double-handling.
+            e.preventDefault()
+            handleFiles(e.dataTransfer.files)
+          }}
           style={{
             position: "fixed",
             inset: 0,
