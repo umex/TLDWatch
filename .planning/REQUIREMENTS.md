@@ -20,7 +20,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **JOB-01**: Playlists are processed sequentially in a single queue; user can pause and resume
 - [x] **JOB-02**: Jobs run in the background — user can navigate away and return to status
-- [ ] **JOB-03**: App persists all completed jobs to local history; user can revisit, edit, and re-export
+- [x] **JOB-03**: App persists all completed jobs to local history; user can revisit, edit, and re-export
 - [x] **JOB-04**: Job queue state persists across app restarts
 - [x] **JOB-05**: User can cancel a queued or running job
 - [x] **JOB-06**: User sees per-job progress (current stage, percent, ETA) in real time
@@ -57,7 +57,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **UI-01**: Main working layout is 3-pane: history (left) | transcript (middle) | summary (right)
 - [x] **UI-02**: No embedded video player; YouTube jobs show a "open in YouTube" link at the current timestamp
-- [ ] **UI-03**: Active transcript line is highlighted based on current scroll position (for local files only)
+- [x] **UI-03**: Active transcript line is highlighted based on current scroll position (for local files only)
 
 ### Hardware & Models
 
@@ -133,7 +133,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INGEST-06 | Phase 3 | Complete |
 | JOB-01 | Phase 6 | Pending |
 | JOB-02 | Phase 4 | Complete |
-| JOB-03 | Phase 5 | Pending |
+| JOB-03 | Phase 5 | Complete |
 | JOB-04 | Phase 4 | Complete |
 | JOB-05 | Phase 4 | Complete |
 | JOB-06 | Phase 4 | Complete |
@@ -154,7 +154,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXPORT-03 | Phase 9 | Pending |
 | UI-01 | Phase 5 | Complete |
 | UI-02 | Phase 5 | Complete |
-| UI-03 | Phase 5 | Pending |
+| UI-03 | Phase 5 | Complete |
 | HW-01 | Phase 1 | Pending |
 | HW-02 | Phase 2 | Pending (lifecycle in 02-02; actual GPU inference in Phase 3/7/8) |
 | HW-03 | Phase 2 | Complete (02-01) |

@@ -173,7 +173,7 @@ Plans:
 
 **Wave 3** (blocked on Wave 1 + Wave 2 completion; integration stitches 05-01 + 05-02b)
 
-- [ ] 05-03-PLAN.md — Scroll-spy active-line highlight + history terminal-transition refetch + re-open-loads-transcript + full end-to-end suite (autonomous; depends on 05-01 + 05-02b; UI-03, JOB-03, UI-01)
+- [x] 05-03-PLAN.md — Scroll-spy active-line highlight + history terminal-transition refetch + re-open-loads-transcript + full end-to-end suite (autonomous; depends on 05-01 + 05-02b; UI-03, JOB-03, UI-01)
 
 ### Phase 6: YouTube Ingest + Sequential Playlist Queue
 
@@ -296,7 +296,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. GPU Backend Detection + Model Manager | 5/5 | Complete    | 2026-06-19 |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 3/3 | Complete    | 2026-06-22 |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 6/6 | Complete    | 2026-06-23 |
-| 5. Local File Ingest + History UI + 3-Pane Layout | 2/4 | In Progress|  |
+| 5. Local File Ingest + History UI + 3-Pane Layout | 4/4 | Plans complete (verifier pending) |  |
 | 6. YouTube Ingest + Sequential Playlist Queue | 0/3 | Not started | - |
 | 7. Diarization Adapter + Speaker Rename Cluster | 0/3 | Not started | - |
 | 8. LLM Adapter + Four Summary Templates + Multi-Select | 0/3 | Not started | - |
