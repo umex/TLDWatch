@@ -3,7 +3,7 @@ status: testing
 phase: 05-local-file-ingest-history-ui-3-pane-layout
 source: [05-VERIFICATION.md]
 started: 2026-06-25T04:23:43Z
-updated: 2026-06-25T04:23:43Z
+updated: 2026-06-25T06:25:00Z
 ---
 
 ## Current Test
@@ -22,7 +22,11 @@ awaiting: user response
 
 ### 1. Drag-and-drop upload percent bar (D-02 live)
 expected: Drag a real multi-gigabyte video file onto the drop zone in a browser with the back-end + Vite dev server running. The upload percent bar climbs 0 -> 100 smoothly (real xhr.upload.onprogress); the ActiveJobCard appears with WS-driven status; on completion the card fades out and the job appears in the history list.
-result: [pending]
+result: issue found + fixed (re-verify)
+issue: Dragging a file showed the full-window drop overlay (D-01 ok), but dropping did nothing -- no ActiveJobCard, no upload started.
+root cause: The overlay div is position:fixed inset:0 z-9999, so it is the actual drop target during any drag. Only the window-level onDrop fired, and it merely preventDefault + hid the overlay, discarding the files. The .drop-zone React onDrop (which calls handleFiles) was unreachable because the overlay sat on top of it.
+fix: commit 844dbb5 -- gave the overlay div its own onDrop that calls handleFiles (same upload flow as .drop-zone); window onDrop keeps preventDefault + hide only (no double-handling). tsc clean, vitest 19/19.
+re-verify: drop a file again -- expect ActiveJobCard + climbing 0->100 percent + terminal handoff to history.
 
 ### 2. Scroll-spy visual highlight (UI-03)
 expected: Open a completed job's detail view and scroll the transcript pane. The segment row nearest the vertical center gets the 4px #2563EB left border + rgba(37,99,235,0.05) tint; scrolling moves the highlight to the new nearest row.
