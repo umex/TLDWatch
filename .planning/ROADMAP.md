@@ -158,7 +158,7 @@ Plans:
   4. The currently active transcript line is highlighted based on scroll position so the user can locate context.
   5. The user can re-open a completed job, see its existing transcript, and re-export it.
 
-**Plans**: 6 plans (4 phase plans across 3 waves + 2 gap-closure plans closing UAT test 4 findings)
+**Plans**: 8 plans (4 phase plans across 3 waves + 4 gap-closure plans closing UAT test 4 + test 5 findings)
 
 Plans:
 
@@ -179,6 +179,11 @@ Plans:
 
 - [x] 05-04-PLAN.md — Persist original_filename (X-Filename header) across manifest + DB + JobResponse + render in HistoryRow with basename(source_path) fallback (autonomous; gap_closure; UI-01, JOB-03)
 - [x] 05-05-PLAN.md — Additive stage_changed(preparing) before _load_stt_adapter + indeterminate Preparing… state in ActiveJobCard until first progress event (autonomous; gap_closure; UI-01, INGEST-01)
+
+**Gap-closure wave 2** (closing UAT test-5 findings; parallel with zero file overlap — 05-06 FE-only, 05-07 back-end + FE test)
+
+- [ ] 05-06-PLAN.md — Snapshot-authoritative ActiveJobCard: treat snapshot status 'starting' as preparing + derive Transcribing label from progress flow (progressArrived) so a late-connecting card shows Preparing/Transcribing regardless of WS connect timing (autonomous; gap_closure; UI-01, INGEST-01)
+- [ ] 05-07-PLAN.md — Populate duration_s on the done path: propagate chunker total_seconds through Transcript.duration_s + transcribed-transition ManifestPatch so completed jobs render MM:SS duration in HistoryRow, not --:-- (autonomous; gap_closure; UI-01, JOB-03)
 
 ### Phase 6: YouTube Ingest + Sequential Playlist Queue
 
