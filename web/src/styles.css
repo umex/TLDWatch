@@ -200,6 +200,24 @@ body {
   transition: width 120ms linear;
 }
 
+/* 05-05 gap B: indeterminate bar during STT model load + first-chunk wait.
+ * A slow rightward-moving stripe gives the user visible "something is
+ * happening" feedback without a misleading 0% determinate fill. */
+@keyframes indeterminate-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.progress-bar > .fill.indeterminate {
+  width: 25%;
+  background: var(--accent);
+  animation: indeterminate-slide 1.2s ease-in-out infinite;
+}
+
 .history-row {
   display: grid;
   grid-template-columns: 1fr auto auto;

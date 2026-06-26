@@ -45,6 +45,14 @@ export default function ActiveJobCard({
   const invalidatedRef = useRef(false)
   const onTerminalRef = useRef(onTerminal)
   onTerminalRef.current = onTerminal
+  // 05-05 gap B: progressArrived sticks once the first progress event
+  // arrives so the determinate bar stays even if a late stage_changed
+  // (transcribing) frame comes in after progress. Reset on jobId change
+  // (mirrors the ws.ts hook's own reset on jobId change).
+  const progressArrived = useRef(false)
+  useEffect(() => {
+    progressArrived.current = false
+  }, [jobId])
 
   useEffect(() => {
     if (!event) return
@@ -58,6 +66,7 @@ export default function ActiveJobCard({
         setStatus(event.stage)
         break
       case "progress":
+        progressArrived.current = true
         setPercent(event.percent)
         setEta(event.eta_s)
         setChunks(event.chunks_done)
@@ -104,7 +113,15 @@ export default function ActiveJobCard({
   const isFailed = status === "failed"
   const isDone = status === "done"
   const isCancelled = status === "cancelled"
-  const showBar = isIngesting || isTranscribing
+  // 05-05 gap B: covers BOTH the BE-emitted preparing stage (model load
+  // window) AND the transcribing-before-first-progress window (first-chunk
+  // wait after the model loads). Once progressArrived is set the card
+  // switches to the determinate Transcribing... X% bar and never reverts.
+  const isPreparing =
+    status === "preparing" ||
+    (isTranscribing && !progressArrived.current)
+  const showBar = isIngesting || isTranscribing || isPreparing
+  const showIndeterminateBar = isPreparing && !isIngesting
   const etaLabel =
     eta !== null && chunks >= 2 ? ` (ETA: ${formatEta(eta)})` : ""
 
@@ -113,6 +130,7 @@ export default function ActiveJobCard({
       className={`active-card${fading ? " terminal" : ""}`}
       data-testid="active-job-card"
       data-status={status}
+      data-preparing={isPreparing ? "true" : "false"}
       style={{
         border: isFailed
           ? "1px solid var(--destructive)"
@@ -134,7 +152,8 @@ export default function ActiveJobCard({
         <span className="badge badge-queued">{jobId.slice(0, 8)}</span>
         {isQueued && <span>In Queue</span>}
         {isIngesting && <span>Ingesting File... {percent}%</span>}
-        {isTranscribing && (
+        {isPreparing && <span>Preparing...</span>}
+        {isTranscribing && progressArrived.current && (
           <span>
             Transcribing... {percent}%{etaLabel}
           </span>
@@ -153,7 +172,11 @@ export default function ActiveJobCard({
           className="progress-bar"
           style={{ marginTop: "var(--space-sm)" }}
         >
-          <div className="fill" style={{ width: `${percent}%` }} />
+          {showIndeterminateBar ? (
+            <div className="fill indeterminate" />
+          ) : (
+            <div className="fill" style={{ width: `${percent}%` }} />
+          )}
         </div>
       )}
     </div>
