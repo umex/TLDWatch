@@ -66,3 +66,53 @@ describe("HistoryRow filename derivation (plan 05-04)", () => {
     cleanup()
   })
 })
+
+// HistoryRow duration rendering -- plan 05-07.
+//
+// Closes UAT test-5 entry 5: a completed job's history row showed
+// duration `--:--` while old failed jobs showed `00:42`. The back-end
+// fix (Transcript.duration_s + chunker + orchestrator transcribed
+// transition) now populates duration_s on the happy path; these tests
+// lock in the HistoryRow.formatDuration rendering for the populated +
+// blank cases so a regression on either side is caught.
+describe("HistoryRow duration rendering (plan 05-07)", () => {
+  it("renders MM:SS for a completed job with non-null duration_s", () => {
+    const { getByText } = renderRow({
+      id: "j1",
+      status: "done",
+      created_at: "2026-06-25T00:00:00+00:00",
+      source_path: "/data/jobs/j1/source.mp4",
+      original_filename: "clip.mp4",
+      duration_s: 42,
+    })
+    expect(getByText("00:42")).toBeTruthy()
+  })
+
+  it("renders MM:SS for a duration over a minute", () => {
+    const { getByText } = renderRow({
+      id: "j2",
+      status: "done",
+      created_at: "2026-06-25T00:00:00+00:00",
+      source_path: "/data/jobs/j2/source.mp4",
+      original_filename: "clip.mp4",
+      duration_s: 125,
+    })
+    expect(getByText("02:05")).toBeTruthy()
+  })
+
+  it("renders --:-- when duration_s is null", () => {
+    const { getByText } = renderRow({
+      id: "j3",
+      status: "done",
+      created_at: "2026-06-25T00:00:00+00:00",
+      source_path: "/data/jobs/j3/source.mp4",
+      original_filename: "clip.mp4",
+      duration_s: null,
+    })
+    expect(getByText("--:--")).toBeTruthy()
+  })
+
+  it.afterAll(() => {
+    cleanup()
+  })
+})
