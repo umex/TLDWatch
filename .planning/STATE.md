@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Phase 5 plan 04 complete (gap-closure: original_filename persisted end-to-end; 05-05 next)"
-last_updated: "2026-06-26T14:23:48.537Z"
-last_activity: 2026-06-26 -- Phase 05 plan 04 complete
+stopped_at: "Phase 5 plan 06 complete (gap-closure: race-condition snapshot-authoritative ActiveJobCard; 05-07 next)"
+last_updated: "2026-06-26T14:37:00.000Z"
+last_activity: 2026-06-26 -- Plan 05-06 complete (race-condition gap-closure)
 progress:
   total_phases: 10
-  completed_phases: 5
-  total_plans: 24
+  completed_phases: 4
+  total_plans: 26
   completed_plans: 24
-  percent: 50
+  percent: 40
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** The user can drop in any video and get back a clean, speaker-aware transcript plus summaries shaped for the content type — without it ever leaving the machine.
-**Current focus:** Phase 05 — local-file-ingest-history-ui-3-pane-layout
+**Current focus:** Phase 05 — Local File Ingest + History UI + 3-Pane Layout
 
 ## Current Position
 
-Phase: 05 (local-file-ingest-history-ui-3-pane-layout) — EXECUTING (gap-closure wave)
-Plan: 5 of 6 complete (05-04 done; 05-05 next sequentially)
-Status: Ready to execute
-Last activity: 2026-06-26 -- Phase 05 plan 04 complete
+Phase: 05 (Local File Ingest + History UI + 3-Pane Layout) — EXECUTING
+Plan: 7 of 8
+Status: Executing Phase 05 (05-06 complete; 05-07 remains)
+Last activity: 2026-06-26 -- Plan 05-06 complete (race-condition gap-closure: snapshot-authoritative ActiveJobCard)
 
-Progress: [██████████████████████] 23/24 plans (96% of milestone plans) — 4/10 phases complete
+Progress: [██████████████████████] 24/24 plans (96% of milestone plans) — 4/10 phases complete
 
 ## Performance Metrics
 
@@ -71,6 +71,7 @@ Progress: [██████████████████████] 2
 | Phase 05 P03 | 20m | 2 tasks | 4 files |
 | Phase 05 P04 | 12m | 2 tasks | 11 files |
 | Phase 05 P05 | 11min | 2 tasks | 4 files |
+| Phase 05 P06 | 2m | 1 task | 2 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,7 @@ Recent decisions affecting current work:
 - [Phase 05]: Plan 05-03 (scroll-spy + terminal-transition + re-open + full E2E suite): useScrollSpy(containerRef, rowIds) -> activeId via IntersectionObserver rooted at the scrollable container with rootMargin '-49% 0px -49% 0px' (UI-SPEC sec3 2% focal line) + pixel-offset fallback (getBoundingClientRect midpoint vs window.innerHeight/2) for fast scroll / short transcripts (RESEARCH Pattern 4). Observer disconnect on cleanup; effect re-runs on rowIds change (T-05-11 no stale-listener leak). threshold: 0 + negative rootMargin (NOT threshold: 1.0). 5 useScrollSpy tests (observer creation, single + multi intersection -> last lowest-in-DOM row, no-intersection -> nearest-by-pixel, disconnect on unmount) using React.createElement to keep the .ts extension (plan acceptance path is src/hooks/useScrollSpy.test.ts). TranscriptPane wires containerRef + useScrollSpy + active prop on TranscriptRow (UI-03, D-09, local files only); Rules-of-Hooks-safe (hooks unconditional, empty rowIds on transcribing state). setup.ts MockIntersectionObserver gained a static instances tracker (Rule 3 test-infra enablement, mirrors WS/XHR trackers). Task 2 was verification-only -- 05-02b already wired the terminal WS -> invalidateJobs + onTerminal fade-out (ActiveJobCard), No Transcripts Yet + terminal-only newest-first (HistoryList), click -> /jobs/:id (HistoryRow), useTranscript 404 -> TRANSCRIBING sentinel + invalidateJobs (jobs.ts); no code changes needed. Full combined suite green end-to-end: pytest 278 passed, vitest 19 passed (14 prior + 5 useScrollSpy), tsc clean, vite build ok, no <video / no dangerouslySetInnerHTML.
 - [Phase 05]: Plan 05-04 (gap-closure A, original_filename): additive nullable TEXT column `original_filename` on jobs (migration 0009) + JobManifest + JobResponse fields (default None) + _row_to_response projection; service.py list_jobs/get_job SELECTs widened (Rule 3 -- required so the projection can read the column). Upload route persists X-Filename into both the on-disk manifest (model_copy update) and the DB row (UPDATE jobs SET original_filename before enqueue) so an immediate GET /jobs/{id} returns it without waiting for the orchestrator. update_stage UPDATE binds original_filename so H3+H4 manifest->DB projection invariant holds on every stage transition. ManifestPatch NOT extended (upload route is the only setter). source_path unchanged (D-04 preserved -- still data/jobs/<id>/source.<ext>). HistoryRow: `job.original_filename ?? basename(job.source_path) ?? "unknown"`. FE types.ts edited manually (stale process held port 8000 so gen-types could not run; plan-sanctioned fallback for a single additive field). test_migration_idempotency _APPLIED_VERSIONS bumped to [1..9] (Rule 3). Full back-end suite 280 passed (278 + 2 new), vitest 22 passed (19 + 3 new), tsc clean, vite build ok.
 - [Phase ?]: 05-05 gap B: preparing is WS-only + additive (no DB write, no StageNameLiteral); stage_changed(transcribing) moved to AFTER adapter load; test path skips preparing; progressArrived ref gates the determinate bar (sticks once set, no revert on late stage_changed)
+- [Phase 05]: Plan 05-06 (gap-closure race-condition, FE-only): snapshot-authoritative state derivation. isQueued no longer matches "starting"; new isTranscribingActive boolean (progressArrived.current && !queued/ingesting/terminal) drives the Transcribing label even when stage_changed(transcribing) was missed (race branch b). isPreparing adds status==="starting" (covers late-connect race branch a) gated by !isTranscribingActive. showBar adds isTranscribingActive; showIndeterminateBar gated by !progressArrived.current. Transcribing label guard switches from (isTranscribing && progressArrived.current) to isTranscribingActive. No BE change (routes_ws.py / orchestrator.py / progress.py untouched — 05-05 WS-only preparing invariant preserved). 29 FE tests green (27 prior + 2 new race-branch tests). tsc clean, vite build ok. RED abfdd78 -> GREEN ab049fa.
 
 ### Pending Todos
 
@@ -135,9 +137,9 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-26T10:21:19.717Z
-Stopped at: Phase 5 plan 04 complete (gap-closure: original_filename persisted end-to-end; 05-05 next)
-Resume file: .planning/phases/05-local-file-ingest-history-ui-3-pane-layout/05-04-SUMMARY.md
+Last session: 2026-06-26T14:37:00.000Z
+Stopped at: Phase 5 plan 06 complete (race-condition gap-closure: snapshot-authoritative ActiveJobCard; 05-07 next)
+Resume file: .planning/phases/05-local-file-ingest-history-ui-3-pane-layout/05-06-SUMMARY.md
 
 ### Gap-closure wave (01-04) — closed
 
