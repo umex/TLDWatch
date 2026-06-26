@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Phase 5 plan 06 complete (gap-closure: race-condition snapshot-authoritative ActiveJobCard; 05-07 next)"
-last_updated: "2026-06-26T14:37:00.000Z"
-last_activity: 2026-06-26 -- Plan 05-06 complete (race-condition gap-closure)
+stopped_at: "Phase 5 plan 06 complete (race-condition gap-closure: snapshot-authoritative ActiveJobCard; 05-07 next)"
+last_updated: "2026-06-26T14:52:05.939Z"
+last_activity: "2026-06-26 -- Plan 05-06 complete (race-condition gap-closure: snapshot-authoritative ActiveJobCard)"
 progress:
   total_phases: 10
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 26
-  completed_plans: 24
-  percent: 40
+  completed_plans: 26
+  percent: 50
 ---
 
 # Project State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 05 (Local File Ingest + History UI + 3-Pane Layout) — EXECUTING
-Plan: 7 of 8
-Status: Executing Phase 05 (05-06 complete; 05-07 remains)
+Plan: 8 of 8
+Status: Ready to execute
 Last activity: 2026-06-26 -- Plan 05-06 complete (race-condition gap-closure: snapshot-authoritative ActiveJobCard)
 
 Progress: [██████████████████████] 24/24 plans (96% of milestone plans) — 4/10 phases complete
@@ -72,6 +72,7 @@ Progress: [██████████████████████] 2
 | Phase 05 P04 | 12m | 2 tasks | 11 files |
 | Phase 05 P05 | 11min | 2 tasks | 4 files |
 | Phase 05 P06 | 2m | 1 task | 2 files |
+| Phase 05 P07 | 9 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -107,6 +108,7 @@ Recent decisions affecting current work:
 - [Phase 05]: Plan 05-04 (gap-closure A, original_filename): additive nullable TEXT column `original_filename` on jobs (migration 0009) + JobManifest + JobResponse fields (default None) + _row_to_response projection; service.py list_jobs/get_job SELECTs widened (Rule 3 -- required so the projection can read the column). Upload route persists X-Filename into both the on-disk manifest (model_copy update) and the DB row (UPDATE jobs SET original_filename before enqueue) so an immediate GET /jobs/{id} returns it without waiting for the orchestrator. update_stage UPDATE binds original_filename so H3+H4 manifest->DB projection invariant holds on every stage transition. ManifestPatch NOT extended (upload route is the only setter). source_path unchanged (D-04 preserved -- still data/jobs/<id>/source.<ext>). HistoryRow: `job.original_filename ?? basename(job.source_path) ?? "unknown"`. FE types.ts edited manually (stale process held port 8000 so gen-types could not run; plan-sanctioned fallback for a single additive field). test_migration_idempotency _APPLIED_VERSIONS bumped to [1..9] (Rule 3). Full back-end suite 280 passed (278 + 2 new), vitest 22 passed (19 + 3 new), tsc clean, vite build ok.
 - [Phase ?]: 05-05 gap B: preparing is WS-only + additive (no DB write, no StageNameLiteral); stage_changed(transcribing) moved to AFTER adapter load; test path skips preparing; progressArrived ref gates the determinate bar (sticks once set, no revert on late stage_changed)
 - [Phase 05]: Plan 05-06 (gap-closure race-condition, FE-only): snapshot-authoritative state derivation. isQueued no longer matches "starting"; new isTranscribingActive boolean (progressArrived.current && !queued/ingesting/terminal) drives the Transcribing label even when stage_changed(transcribing) was missed (race branch b). isPreparing adds status==="starting" (covers late-connect race branch a) gated by !isTranscribingActive. showBar adds isTranscribingActive; showIndeterminateBar gated by !progressArrived.current. Transcribing label guard switches from (isTranscribing && progressArrived.current) to isTranscribingActive. No BE change (routes_ws.py / orchestrator.py / progress.py untouched — 05-05 WS-only preparing invariant preserved). 29 FE tests green (27 prior + 2 new race-branch tests). tsc clean, vite build ok. RED abfdd78 -> GREEN ab049fa.
+- [Phase ?]: Plan 05-07 (gap-closure duration_s): Transcript.duration_s additive optional field (media duration = chunker total_seconds = len(audio)/SAMPLE_RATE); both chunker return paths populate it; orchestrator transcribed transition projects ManifestPatch(language=..., duration_s=transcript.duration_s); done transition re-projects via existing H3+H4 update_stage SET clause (no done-branch change). 05-05 preparing emission block + 05-04 H3+H4 projection invariant preserved. 283 BE + 32 FE tests green.
 
 ### Pending Todos
 
@@ -137,7 +139,7 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-26T14:37:00.000Z
+Last session: 2026-06-26T14:51:20.633Z
 Stopped at: Phase 5 plan 06 complete (race-condition gap-closure: snapshot-authoritative ActiveJobCard; 05-07 next)
 Resume file: .planning/phases/05-local-file-ingest-history-ui-3-pane-layout/05-06-SUMMARY.md
 
