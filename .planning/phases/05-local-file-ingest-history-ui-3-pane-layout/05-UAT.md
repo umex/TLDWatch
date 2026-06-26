@@ -3,12 +3,12 @@ status: diagnosed
 phase: 05-local-file-ingest-history-ui-3-pane-layout
 source: [05-VERIFICATION.md]
 started: 2026-06-25T04:23:43Z
-updated: 2026-06-26T13:53:30Z
+updated: 2026-06-26T17:30:00Z
 ---
 
 ## Current Test
 
-[testing complete -- 2 gaps open for fresh-session gap-closure]
+[testing complete -- test 6 issue: 05-06 race fix did not resolve live "nothing" symptom; diagnosing]
 
 ## Tests
 
@@ -123,11 +123,30 @@ note: |
   (card shows "In Queue" / no bar for the whole transcription when the WS connects late).
   Plus a minor blank-duration gap. Both logged in Gaps below for fresh-session closure.
 
+### 6. Gap-closure re-test (05-06 + 05-07) against fresh servers
+expected: With the back-end + Vite dev server freshly restarted on current code, drop a SHORT named clip. After upload completes the active card shows "Preparing..." with an indeterminate moving-stripe bar (NOT "In Queue" / no bar -- the 05-06 race fix lands even when the WS connects late) -> on first chunk progress it switches to "Transcribing... X%" determinate bar that does not revert -> on completion the card fades and the job appears in history showing the DROPPED FILENAME (not "source.mp4" -- 05-04) PLUS a MM:SS duration (not "--:--" -- 05-07) -> click the row -> detail loads transcript + summary panes with no embedded video player.
+result: issue
+reported: "after upload there was nothing untill video was transcribed and appeared in the history row."
+severity: major
+note: |
+  The 05-06 snapshot-authoritative FE fix did NOT resolve the live symptom. After upload
+  completes the user sees NOTHING (no "Preparing..." card, no "Transcribing... X%" bar) until the
+  job finishes and pops into the history list. This is the SAME "nothing is going on then
+  transcriptions appear" complaint from test 4, recurring despite 05-06. Two leading hypotheses:
+  (1) stale runtime AGAIN -- the served FE bundle is not the 05-06 build (Vite not restarted /
+      browser cached / HMR missed), so the live card never gets the isPreparing(status==='starting')
+      branch; OR (2) the card is not visible at all during transcription -- "nothing" may mean the
+      ActiveJobCard unmounts/disappears right after upload-done (DropZone/HistoryPage lifecycle),
+      in which case 05-06's label/bar logic is irrelevant because there is no card to label.
+  Diagnosis must distinguish these. The 05-07 duration closure + 05-04 filename closure were NOT
+  observable in this run (the job never showed an active card to inspect; only the final history
+  row was seen) -- their live confirmation is deferred until the card-visibility root cause is fixed.
+
 ## Summary
 
-total: 5
+total: 6
 passed: 3
-issues: 1
+issues: 2
 pending: 0
 skipped: 0
 blocked: 0
@@ -269,6 +288,61 @@ resolved: 1
   artifacts: []
   missing: []
   debug_session: ""
+  pending_retest: false
+
+- truth: "After upload completes the active card shows 'Preparing...' indeterminate bar then 'Transcribing... X%' determinate bar (05-06 race fix) with visible progress feedback throughout -- never silence between upload-done and the job appearing in history"
+  status: diagnosed
+  reason: "User reported: after upload there was nothing untill video was transcribed and appeared in the history row."
+  severity: major
+  test: 6
+  root_cause: >
+    REAL CODE GAP -- 05-06's fix was built on a FALSE premise. 05-06 assumed a late-connecting
+    card's WS connect snapshot carries status:"starting" during the model-load + first-chunk wait
+    (ActiveJobCard.tsx:116-119 comment states this). It does NOT. In the live runtime the DB status
+    for the ENTIRE model-load + transcription window is "ingesting", never "starting" and never
+    "transcribing":
+    - The ONLY writer of DB status "starting" is queue.py:118 (pull_next atomic claim), and
+      orchestrator.py:230-233 overwrites it with update_stage("ingested") milliseconds later.
+      stage_to_status("ingested") = "ingesting" (manifest.py:41,67-77).
+    - "transcribed"->"transcribing" is persisted ONLY at orchestrator.py:290-297, AFTER
+      `transcript = await future` returns (line 282), immediately followed by update_stage("done")
+      at line 299. So "transcribing" is never the snapshot status DURING transcription.
+    - stage_changed(preparing) (orchestrator.py:260) + stage_changed(transcribing) (:263) are
+      WS-ONLY with no update_stage (comment :246-250) -- a card connecting after they were emitted
+      misses them, and routes_ws.py:186 sends snapshot.status = job.status (raw DB = "ingesting").
+    The DropZone race makes late-connect the COMMON case, not an edge case: onJobCreated fires
+    only when upload.status==="done" (DropZone.tsx:84-87), by which point the worker has usually
+    already claimed the job and emitted the WS-only stage_changed(preparing).
+    FE consequence once the card receives snapshot{status:"ingesting"}: isIngesting=true
+    (ActiveJobCard.tsx:108); isTranscribingActive (:121-127) is gated by !isIngesting -> false
+    even after progress events set progressArrived.current (the snapshot handler :60-64 never
+    sets progressArrived; only the "progress" case :69 does, and !isIngesting blocks it anyway);
+    isPreparing's status==="starting" branch (:136) is dead code for this case. The card renders a
+    frozen "Ingesting File... 0%" (model-load, no progress.json) / mislabeled "Ingesting File... X%"
+    (mid-transcription, bar moves but label wrong) -- perceived as "nothing is going on" until the
+    job finishes and pops into history. Reproduces with FRESH servers + browser hard reload; the
+    stale-runtime angle was adversarially refuted (Vite serves source on demand keyed by mtime;
+    ActiveJobCard.tsx mtime 16:36 is post-05-06; the running BE PID 20596 started 14:43 and
+    includes 05-05's stage_changed(preparing) emission). NOT operational -- a code change is required.
+  closure: ""
+  artifacts:
+    - path: "web/src/components/ActiveJobCard.tsx"
+      issue: ":116-119 comment falsely claims the snapshot carries status:'starting'; :121-127 isTranscribingActive gated by !isIngesting (false when snapshot='ingesting') so it never fires for a late-connecting card; :134-138 isPreparing status==='starting' branch (:136) is dead code for the late-connect case (snapshot is 'ingesting'). Snapshot handler :60-64 ignores event.stage + does not seed progressArrived from snapshot.percent. Card renders stuck 'Ingesting File... 0%' instead of 'Preparing...' / 'Transcribing... X%'."
+    - path: "app/jobs/orchestrator.py"
+      issue: ":260 + :263 publish stage_changed(preparing/transcribing) WS-only with no update_stage (comment :246-250); DB status stays 'ingesting' (:230-233) for the whole model-load + transcribe window; 'transcribing' persisted only at :290-297 after `transcript = await future` (:282) then immediately 'done' (:299). Late-connecting snapshots carry status='ingesting'."
+    - path: "app/jobs/manifest.py"
+      issue: ":39-44 _STAGE_STATUS_MAP / :67-77 stage_to_status: no stage maps to 'starting' and no pre-transcribe stage maps to 'transcribing'. 'ingested'->'ingesting' is the only status persisted between enqueue and transcribe-done. The DB cannot represent the preparing/transcribing state the FE needs."
+    - path: "app/api/routes_ws.py"
+      issue: ":180-188 snapshot sends status=job.status (raw DB) + stage=manifest.current_stage + percent/eta from progress.json, but the FE snapshot handler (ActiveJobCard.tsx:60-64) ignores event.stage; snapshot.percent (:184) is sent but the FE only treats percent>0 as progress via the 'progress' EVENT (:69), not via snapshot -- a reconnecting card cannot derive transcribing state from the snapshot alone."
+    - path: "web/src/components/DropZone.tsx"
+      issue: ":84-87 onJobCreated fires only when upload.status==='done' (after upload completes), so the card's WS connect races behind the worker's claim + WS-only stage_changed(preparing) emission -- making the late-connect race the common case, not an edge case."
+  missing:
+    - "FE fix (cheaper, mirrors 05-06 style): in ActiveJobCard.tsx extend isPreparing to also cover (status==='ingesting' && !progressArrived.current) -- local ingest is instant, so 'ingesting' post-snapshot means 'waiting for model load / first chunk' -- and extend isTranscribingActive to also fire when (status==='ingesting' && progressArrived.current). Late-connecting card then shows 'Preparing...' + indeterminate bar (model load) then 'Transcribing... X%' + determinate bar (progress flowing)."
+    - "FE fix part 2: in ActiveJobCard.tsx:60-64 (snapshot case) also consume event.stage (currently ignored) as a fallback signal, and read snapshot.percent (already sent at routes_ws.py:184) to seed progressArrived + drive the determinate bar immediately on reconnect so a reconnecting card shows the real percent without waiting for the next progress event."
+    - "BE fix (more robust alternative / complement): in orchestrator.py around :260/:263 persist a transient status to the DB alongside the WS-only stage_changed publish so late-connecting snapshots carry an unambiguous 'transcribing' (or new 'preparing') status + percent from progress.json. Requires extending manifest.py _STAGE_STATUS_MAP / StageNameLiteral -- heavier, touches the H3+H4 invariant."
+    - "Tests: (a) snapshot{status:'ingesting', percent:0} + NO stage_changed -> 'Preparing...' + indeterminate bar; (b) snapshot{status:'ingesting', percent:0} + progress{percent:45} with NO stage_changed(transcribing) -> 'Transcribing... 45%' + determinate bar; (c) snapshot{status:'ingesting', percent:45} (reconnect mid-transcription) -> 'Transcribing... 45%' + determinate bar from snapshot alone."
+    - "VERIFICATION PREREQ (operational, not the code fix): kill PID 20596 (BE, no --reload) + PID 32968 (Vite), restart both with current HEAD 2af8354, hard-reload browser, before re-running UAT test 6. Stale runtime was NOT the root cause but fresh code is required to verify the fix."
+  debug_session: ".planning/debug/active-card-silence.md"
   pending_retest: false
 
 ## Noted Enhancements (out of scope -- not gaps)
