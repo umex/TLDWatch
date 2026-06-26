@@ -177,7 +177,7 @@ Plans:
 
 **Gap-closure wave** (closing UAT test-4 findings; parallel with zero file overlap)
 
-- [ ] 05-04-PLAN.md — Persist original_filename (X-Filename header) across manifest + DB + JobResponse + render in HistoryRow with basename(source_path) fallback (autonomous; gap_closure; UI-01, JOB-03)
+- [x] 05-04-PLAN.md — Persist original_filename (X-Filename header) across manifest + DB + JobResponse + render in HistoryRow with basename(source_path) fallback (autonomous; gap_closure; UI-01, JOB-03)
 - [ ] 05-05-PLAN.md — Additive stage_changed(preparing) before _load_stt_adapter + indeterminate Preparing… state in ActiveJobCard until first progress event (autonomous; gap_closure; UI-01, INGEST-01)
 
 ### Phase 6: YouTube Ingest + Sequential Playlist Queue

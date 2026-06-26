@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 5 plan 03 complete (phase ready for verifier)
-last_updated: "2026-06-25T06:30:00.000Z"
-last_activity: 2026-06-25 -- Phase 05 plan 03 complete
+stopped_at: Phase 5 plan 04 complete (gap-closure: original_filename persisted end-to-end; 05-05 next)
+last_updated: "2026-06-26T10:07:05Z"
+last_activity: 2026-06-26 -- Phase 05 plan 04 complete
 progress:
   total_phases: 10
   completed_phases: 4
-  total_plans: 22
-  completed_plans: 22
-  percent: 48
+  total_plans: 24
+  completed_plans: 23
+  percent: 40
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 ## Current Position
 
-Phase: 05 (local-file-ingest-history-ui-3-pane-layout) — EXECUTING (all plans complete; verifier pending)
-Plan: 4 of 4 (complete)
-Status: Phase 5 plans complete — ready for /gsd-verify-phase 5
-Last activity: 2026-06-25 -- Phase 05 plan 03 complete
+Phase: 05 (local-file-ingest-history-ui-3-pane-layout) — EXECUTING (gap-closure wave)
+Plan: 4 of 6 complete (05-04 done; 05-05 next sequentially)
+Status: Executing Phase 05 gap-closure wave
+Last activity: 2026-06-26 -- Phase 05 plan 04 complete
 
-Progress: [██████████████████████] 22/22 plans (100% of milestone plans) — 4/10 phases complete
+Progress: [██████████████████████] 23/24 plans (96% of milestone plans) — 4/10 phases complete
 
 ## Performance Metrics
 
@@ -69,6 +69,7 @@ Progress: [██████████████████████] 2
 | Phase 05 P02a | resumed | - tasks | - files |
 | Phase 05 P02b | 8m | 2 tasks | 15 files |
 | Phase 05 P03 | 20m | 2 tasks | 4 files |
+| Phase 05 P04 | 12m | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,7 @@ Recent decisions affecting current work:
 - [Phase ?]: Plan 05-02a (FE scaffold + API/WS layer): closed out manually after executor hit HTTP 429 mid-Task-2 (files written, smoke.test.ts line-2 corrupted, SUMMARY missing). Fixed corruption; added missing @testing-library/dom ^10 peer dep (installed --legacy-peer-deps); removed stray root .openapi-snapshot.json scratch. tsc clean, vitest 6/6, vite build ok.
 - [Phase 05]: Plan 05-02b (FE shell + ingest UI): createBrowserRouter routes / + /jobs/:id (react-router 8, NOT react-router-dom); 2-pane .detail-layout (transcript 60% | summary 40%) with no embedded media player (UI-02); TranscriptRow CSS Grid 64px|80px|1fr with [mm:ss] timestamp + empty speaker gutter + active prop for 05-03 scroll-spy; SummaryPane exact D-08 placeholder; ExportStub disabled D-10 stub. useUpload is XHR-PRIMARY (D-02 locked): new XMLHttpRequest -> POST /jobs/upload with Idempotency-Key (idempotencyKey SHA-256->32 hex), X-Filename, octet-stream; xhr.upload.onprogress drives real 0->100 percent; xhr.send(file) streams from disk without JS-heap buffering (FE INGEST-01); NO fetch/duplex, NO FormData (raw-body 05-01 contract). DropZone = full-window overlay + dedicated .drop-zone (D-01) + multi-file FIFO queue. ActiveJobCard = useJobEvents WS (D-03) with queued/ingesting/transcribing lifecycle + ETA gate (>=2 chunks) + terminal fade-out + invalidateJobs refetch. HistoryList = three useJobs(terminal) merged newest-first (D-05) + No Transcripts Yet empty state. HistoryRow click -> /jobs/:id. 14 FE tests green (6 smoke + 5 DetailPage + 3 jobs incl. D-02 0->50->100 progress assertion). tsc clean, vite build ok. Strict grep gates (no <video / dangerouslySetInnerHTML / FormData / duplex literals in source) required rewording behavior-rationale comments.
 - [Phase 05]: Plan 05-03 (scroll-spy + terminal-transition + re-open + full E2E suite): useScrollSpy(containerRef, rowIds) -> activeId via IntersectionObserver rooted at the scrollable container with rootMargin '-49% 0px -49% 0px' (UI-SPEC sec3 2% focal line) + pixel-offset fallback (getBoundingClientRect midpoint vs window.innerHeight/2) for fast scroll / short transcripts (RESEARCH Pattern 4). Observer disconnect on cleanup; effect re-runs on rowIds change (T-05-11 no stale-listener leak). threshold: 0 + negative rootMargin (NOT threshold: 1.0). 5 useScrollSpy tests (observer creation, single + multi intersection -> last lowest-in-DOM row, no-intersection -> nearest-by-pixel, disconnect on unmount) using React.createElement to keep the .ts extension (plan acceptance path is src/hooks/useScrollSpy.test.ts). TranscriptPane wires containerRef + useScrollSpy + active prop on TranscriptRow (UI-03, D-09, local files only); Rules-of-Hooks-safe (hooks unconditional, empty rowIds on transcribing state). setup.ts MockIntersectionObserver gained a static instances tracker (Rule 3 test-infra enablement, mirrors WS/XHR trackers). Task 2 was verification-only -- 05-02b already wired the terminal WS -> invalidateJobs + onTerminal fade-out (ActiveJobCard), No Transcripts Yet + terminal-only newest-first (HistoryList), click -> /jobs/:id (HistoryRow), useTranscript 404 -> TRANSCRIBING sentinel + invalidateJobs (jobs.ts); no code changes needed. Full combined suite green end-to-end: pytest 278 passed, vitest 19 passed (14 prior + 5 useScrollSpy), tsc clean, vite build ok, no <video / no dangerouslySetInnerHTML.
+- [Phase 05]: Plan 05-04 (gap-closure A, original_filename): additive nullable TEXT column `original_filename` on jobs (migration 0009) + JobManifest + JobResponse fields (default None) + _row_to_response projection; service.py list_jobs/get_job SELECTs widened (Rule 3 -- required so the projection can read the column). Upload route persists X-Filename into both the on-disk manifest (model_copy update) and the DB row (UPDATE jobs SET original_filename before enqueue) so an immediate GET /jobs/{id} returns it without waiting for the orchestrator. update_stage UPDATE binds original_filename so H3+H4 manifest->DB projection invariant holds on every stage transition. ManifestPatch NOT extended (upload route is the only setter). source_path unchanged (D-04 preserved -- still data/jobs/<id>/source.<ext>). HistoryRow: `job.original_filename ?? basename(job.source_path) ?? "unknown"`. FE types.ts edited manually (stale process held port 8000 so gen-types could not run; plan-sanctioned fallback for a single additive field). test_migration_idempotency _APPLIED_VERSIONS bumped to [1..9] (Rule 3). Full back-end suite 280 passed (278 + 2 new), vitest 22 passed (19 + 3 new), tsc clean, vite build ok.
 
 ### Pending Todos
 
@@ -131,9 +133,9 @@ Items acknowledged and carried forward from project initialization:
 
 ## Session Continuity
 
-Last session: 2026-06-25T06:30:00.000Z
-Stopped at: Phase 5 plan 03 complete (phase ready for verifier)
-Resume file: .planning/phases/05-local-file-ingest-history-ui-3-pane-layout/05-03-SUMMARY.md
+Last session: 2026-06-26T10:07:05Z
+Stopped at: Phase 5 plan 04 complete (gap-closure: original_filename persisted end-to-end; 05-05 next)
+Resume file: .planning/phases/05-local-file-ingest-history-ui-3-pane-layout/05-04-SUMMARY.md
 
 ### Gap-closure wave (01-04) — closed
 
