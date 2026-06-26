@@ -158,7 +158,7 @@ Plans:
   4. The currently active transcript line is highlighted based on scroll position so the user can locate context.
   5. The user can re-open a completed job, see its existing transcript, and re-export it.
 
-**Plans**: 4 plans across 3 waves (Wave-1: back-end + FE scaffold parallel; Wave-2: FE shell; Wave-3: integration)
+**Plans**: 6 plans (4 phase plans across 3 waves + 2 gap-closure plans closing UAT test 4 findings)
 
 Plans:
 
@@ -174,6 +174,11 @@ Plans:
 **Wave 3** (blocked on Wave 1 + Wave 2 completion; integration stitches 05-01 + 05-02b)
 
 - [x] 05-03-PLAN.md — Scroll-spy active-line highlight + history terminal-transition refetch + re-open-loads-transcript + full end-to-end suite (autonomous; depends on 05-01 + 05-02b; UI-03, JOB-03, UI-01)
+
+**Gap-closure wave** (closing UAT test-4 findings; parallel with zero file overlap)
+
+- [ ] 05-04-PLAN.md — Persist original_filename (X-Filename header) across manifest + DB + JobResponse + render in HistoryRow with basename(source_path) fallback (autonomous; gap_closure; UI-01, JOB-03)
+- [ ] 05-05-PLAN.md — Additive stage_changed(preparing) before _load_stt_adapter + indeterminate Preparing… state in ActiveJobCard until first progress event (autonomous; gap_closure; UI-01, INGEST-01)
 
 ### Phase 6: YouTube Ingest + Sequential Playlist Queue
 
