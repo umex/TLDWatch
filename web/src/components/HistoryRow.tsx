@@ -32,7 +32,12 @@ function formatDuration(seconds: number | null | undefined): string {
 
 export default function HistoryRow({ job }: { job: JobResponse }) {
   const navigate = useNavigate()
-  const filename = job.source_path ? basename(job.source_path) : "unknown"
+  // Plan 05-04: prefer the original dropped filename (persisted from
+  // X-Filename at upload time); fall back to basename(source_path) for
+  // jobs created without an upload, then "unknown" when neither is set.
+  const filename =
+    job.original_filename ??
+    (job.source_path ? basename(job.source_path) : "unknown")
   return (
     <div
       className="history-row"

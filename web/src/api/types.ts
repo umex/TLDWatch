@@ -655,6 +655,8 @@ export interface components {
             source_type?: string | null;
             /** Source Path */
             source_path?: string | null;
+            /** Original Filename */
+            original_filename?: string | null;
             /** Source Sha256 */
             source_sha256?: string | null;
             /** Duration S */
@@ -708,6 +710,8 @@ export interface components {
             source_type?: string | null;
             /** Source Path */
             source_path?: string | null;
+            /** Original Filename */
+            original_filename?: string | null;
             /** Source Sha256 */
             source_sha256?: string | null;
             /** Current Stage */
