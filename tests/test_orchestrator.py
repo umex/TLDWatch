@@ -1331,3 +1331,76 @@ async def test_resume_advance_respects_cancel_flag(tmp_data_dir: Path) -> None:
         f"WR-02: the CR-03 advance branch must NOT publish 'done' when "
         f"the cancel flag is set; got: {events}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 plan 05-07 -- UAT test-5 entry 5 gap-closure regression test
+# (TDD RED-first).
+#
+# ``test_done_job_duration_s_populated`` closes UAT test-5 entry 5: a
+# completed job's history row showed duration `--:--` while old failed
+# jobs showed `00:42`. Root cause: the orchestrator's `transcribed`
+# transition passed `ManifestPatch(language=transcript.language)` with
+# NO `duration_s`, and the `done` transition passed no patch, so
+# `duration_s` was never populated on the happy path. The chunker already
+# computed `total_seconds = len(audio)/SAMPLE_RATE` but the `Transcript`
+# model had no duration field. The fix adds `Transcript.duration_s`,
+# populates it on both chunker return paths, and projects it through
+# the `transcribed` transition's ManifestPatch. This test asserts the
+# happy path now populates duration_s on both the DB row and the manifest.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_done_job_duration_s_populated(tmp_data_dir: Path) -> None:
+    """05-07: a completed job row + manifest carry a non-null duration_s.
+
+    After ``run_job`` completes via the FakeAdapter fast path, the DB
+    row's ``duration_s`` is non-null and positive (the source media
+    duration in seconds, from ``len(audio)/SAMPLE_RATE`` -- the
+    FakeAdapter.decode_audio default returns 30 s of zeros, so
+    ``total_seconds == 30.0``). The manifest's ``duration_s`` equals
+    the DB row's ``duration_s`` (H3+H4 manifest-DB projection invariant
+    holds for duration_s).
+    """
+    s = _settings(tmp_data_dir)
+    sf = await _session_factory(s)
+
+    async with sf() as session:
+        job = await create_job(session, s, source_type="local")
+        job_id = job.id
+        await ensure_job_dir(s, job_id)
+        src = job_dir(s, job_id) / "source.mp4"
+        src.write_bytes(b"\x00" * 16)
+        from app.jobs.manifest import read_manifest
+
+        m = await read_manifest(s, job_id)
+        m = m.model_copy(update={"source_path": str(src)})
+        await write_manifest(s, m)
+        from sqlalchemy import text
+
+        await session.execute(
+            text("UPDATE jobs SET source_path = :p WHERE id = :id"),
+            {"p": str(src), "id": job_id},
+        )
+        await session.commit()
+
+    await run_job(s, sf, job_id, bus=EventBus(), adapter=FakeAdapter())
+
+    async with sf() as session:
+        row = await get_job(session, job_id)
+    assert row is not None
+    assert row.status == "done"
+    # duration_s must be populated on the happy path (not None, positive).
+    assert row.duration_s is not None, (
+        f"completed job row.duration_s must be non-null (05-07); got {row.duration_s!r}"
+    )
+    assert row.duration_s > 0, (
+        f"completed job row.duration_s must be positive (05-07); got {row.duration_s!r}"
+    )
+    # H3+H4: manifest.duration_s == DB row.duration_s (projection invariant).
+    manifest = await read_manifest(s, job_id)
+    assert manifest.duration_s == row.duration_s, (
+        f"manifest.duration_s ({manifest.duration_s!r}) must equal "
+        f"row.duration_s ({row.duration_s!r}) -- H3+H4 projection invariant"
+    )
