@@ -227,6 +227,7 @@ async def update_stage(
             "UPDATE jobs SET status = :status, current_stage = :stage, "
             "stage_timestamps_json = :ts_json, updated_at = :now, "
             "source_type = :source_type, source_path = :source_path, "
+            "original_filename = :original_filename, "
             "source_sha256 = :source_sha256, duration_s = :duration_s, "
             "language = :language, summary_kinds_json = :summary_kinds_json "
             "WHERE id = :id"
@@ -238,6 +239,7 @@ async def update_stage(
             "now": utcnow_iso(),
             "source_type": new_manifest.source_type,
             "source_path": new_manifest.source_path,
+            "original_filename": new_manifest.original_filename,
             "source_sha256": new_manifest.source_sha256,
             "duration_s": new_manifest.duration_s,
             "language": new_manifest.language,

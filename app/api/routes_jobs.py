@@ -24,6 +24,7 @@ import os
 import aiofiles
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from pydantic import ValidationError
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_session, get_settings
@@ -200,12 +201,28 @@ async def upload_source(
 
     # 5. Patch manifest.source_path + source_type='local' (Pitfall 3 --
     #    do NOT call update_stage("ingested") which would set
-    #    status='ingesting' and block enqueue).
+    #    status='ingesting' and block enqueue). Plan 05-04: also persist
+    #    the original X-Filename as ``original_filename`` so HistoryRow can
+    #    display the dropped name (source_path stays source.<ext> per D-04).
     manifest = await read_manifest(settings, job_id)
     manifest = manifest.model_copy(
-        update={"source_path": str(final), "source_type": "local"}
+        update={
+            "source_path": str(final),
+            "source_type": "local",
+            "original_filename": x_filename,
+        }
     )
     await write_manifest(settings, manifest)
+
+    # Write original_filename to the DB row now so an immediate
+    # GET /jobs/{id} returns it without waiting for the orchestrator's
+    # update_stage("ingested") re-projection (idempotent -- update_stage
+    # re-projects the same value from the manifest later).
+    await session.execute(
+        text("UPDATE jobs SET original_filename = :name WHERE id = :id"),
+        {"name": x_filename, "id": job_id},
+    )
+    await session.commit()
 
     # 6. Enqueue -> status='queued', wake worker. The widened enqueue
     #    clause (Task 1) accepts 'uploading' rows.

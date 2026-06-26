@@ -25,8 +25,9 @@ from app.models.settings import Settings
 from app.storage.db import apply_migrations, make_engine
 
 # The full set of migration versions applied by the runner. Updated in
-# Plan 04-03 when migration 0008 (idempotency_keys) was added.
-_APPLIED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8]
+# Plan 04-03 when migration 0008 (idempotency_keys) was added, and again
+# in Plan 05-04 when migration 0009 (original_filename) was added.
+_APPLIED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 
 @pytest.mark.asyncio

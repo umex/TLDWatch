@@ -119,6 +119,11 @@ class JobResponse(BaseModel):
     created_at: datetime
     source_type: str | None = None
     source_path: str | None = None
+    # Plan 05-04: original dropped filename (display-only, additive).
+    # None for jobs created without an upload. Defaults keep existing
+    # constructions working (strict=True, extra="forbid" -- a new field
+    # with a default does not break existing callers).
+    original_filename: str | None = None
     source_sha256: str | None = None
     current_stage: str | None = None
     duration_s: float | None = None
@@ -177,6 +182,7 @@ def _row_to_response(row: Any) -> JobResponse:
         created_at=datetime.fromisoformat(row.created_at),
         source_type=row.source_type,
         source_path=row.source_path,
+        original_filename=row.original_filename,
         source_sha256=row.source_sha256,
         current_stage=row.current_stage,
         duration_s=row.duration_s,

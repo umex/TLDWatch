@@ -23,6 +23,13 @@ class JobManifest(BaseModel):
     job_id: str
     source_type: str | None = None
     source_path: str | None = None
+    # Plan 05-04: the original dropped filename (display-only). None for
+    # jobs created via POST /jobs (no upload). source_path still points at
+    # the in-job-dir source.<ext> file (D-04 unchanged); this field is a
+    # pure additive display addition. Default None keeps existing manifest
+    # JSON files loadable (Pydantic fills the default -- same pattern as
+    # ``diarization_enabled``).
+    original_filename: str | None = None
     source_sha256: str | None = None
     duration_s: float | None = None
     language: str | None = None
