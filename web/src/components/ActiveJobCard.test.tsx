@@ -50,7 +50,7 @@ function fire(data: unknown) {
   })
 }
 
-describe("ActiveJobCard preparing state (plan 05-05)", () => {
+describe("ActiveJobCard preparing state (plans 05-05 + 05-06)", () => {
   it("shows Preparing... on stage_changed(preparing)", async () => {
     const { getByText, queryByText, getByTestId, container } = renderCard()
     await waitForSocket()
@@ -188,6 +188,66 @@ describe("ActiveJobCard preparing state (plan 05-05)", () => {
     await waitFor(() => {
       expect(container.querySelector(".active-card.terminal")).toBeTruthy()
     })
+  })
+
+  it("shows Preparing... + indeterminate bar when snapshot status is starting and no stage_changed fires (05-06 race branch a)", async () => {
+    const { getByText, queryByText, getByTestId, container } = renderCard()
+    await waitForSocket()
+    // Late-connecting card: snapshot status "starting" (DB status during the
+    // model-load window -- preparing is WS-only and NOT persisted), and the
+    // stage_changed(preparing) event was already broadcast before subscribe.
+    fire({
+      type: "snapshot",
+      job_id: "job-1",
+      stage: null,
+      percent: 0,
+      eta: null,
+      status: "starting",
+    })
+
+    expect(getByText("Preparing...")).toBeTruthy()
+    expect(queryByText(/In Queue/)).toBeNull()
+    expect(getByTestId("active-job-card").getAttribute("data-preparing")).toBe(
+      "true",
+    )
+    const indeterminate = container.querySelector(".fill.indeterminate")
+    expect(indeterminate).toBeTruthy()
+    const determinate = container.querySelector('.fill[style*="width"]')
+    expect(determinate).toBeNull()
+  })
+
+  it("shows Transcribing...X% determinate bar when snapshot is starting and a progress event arrives with no stage_changed(transcribing) (05-06 race branch b)", async () => {
+    const { getByText, queryByText, getByTestId, container } = renderCard()
+    await waitForSocket()
+    // Late-connecting card: snapshot status "starting", then a progress event
+    // arrives (the card missed BOTH stage_changed(preparing) AND
+    // stage_changed(transcribing) -- simulates idle worker + StrictMode
+    // remount delaying the real socket).
+    fire({
+      type: "snapshot",
+      job_id: "job-1",
+      stage: null,
+      percent: 0,
+      eta: null,
+      status: "starting",
+    })
+    fire({
+      type: "progress",
+      chunks_done: 2,
+      chunks_total: 5,
+      percent: 45,
+      eta_s: 60,
+      chunk_start_s: 0,
+    })
+
+    expect(getByText(/Transcribing\.\.\. 45%/)).toBeTruthy()
+    expect(getByTestId("active-job-card").getAttribute("data-preparing")).toBe(
+      "false",
+    )
+    expect(queryByText(/In Queue/)).toBeNull()
+    expect(queryByText("Preparing...")).toBeNull()
+    const determinate = container.querySelector('.fill[style*="width"]')
+    expect(determinate).toBeTruthy()
   })
 
   it.afterAll(() => {
