@@ -11,7 +11,7 @@ A local-first web app that turns any video (local file, YouTube URL, or YouTube 
 
 - [x] **Phase 3: STT Adapter + Audio Chunker + Standalone CLI** - faster-whisper adapter, long-audio chunker with OOM fallback, language auto-detect, a runnable CLI that proves the GPU abstraction end-to-end. (3/3 plans complete; verified 11/11 + UAT passed + threat-secure 9/9 — laptop CUDA SC-5 closed 2026-06-22) (completed 2026-06-22)
 - [x] **Phase 4: Job Orchestrator + Persistent Queue + WebSocket Progress** - In-process job runner, SQLite-backed queue with restart persistence, state machine with file-as-truth, real-time progress broadcast. (5/6 plans complete — 3 original + 2 gap-closure; WR-04 gap-closure remaining)
-- [ ] **Phase 5: Local File Ingest + History UI + 3-Pane Layout** - Streaming drag-and-drop upload, history list (left pane), transcript view (middle), summary view (right), active-line highlight, no embedded video.
+- [x] **Phase 5: Local File Ingest + History UI + 3-Pane Layout** - Streaming drag-and-drop upload, history list (left pane), transcript view (middle), summary view (right), active-line highlight, no embedded video. (completed 2026-06-26)
 - [ ] **Phase 6: YouTube Ingest + Sequential Playlist Queue** - yt-dlp audio download, single-URL submit, playlist fan-out with pause/resume, timestamp link-out to YouTube.
 - [ ] **Phase 7: Diarization Adapter + Speaker Rename Cluster** - pyannote adapter (optional, HF-token-gated), default Person N labels, bulk-rename via chips, per-line reassign, find-and-replace speaker.
 - [ ] **Phase 8: LLM Adapter + Four Summary Templates + Multi-Select** - llama-cpp-python adapter, Qwen2.5-Instruct GGUF, four typed schemas (meeting, investment, concept, quick recap), multi-select per job, schema-validate + retry.
@@ -178,7 +178,7 @@ Plans:
 **Gap-closure wave** (closing UAT test-4 findings; parallel with zero file overlap)
 
 - [x] 05-04-PLAN.md — Persist original_filename (X-Filename header) across manifest + DB + JobResponse + render in HistoryRow with basename(source_path) fallback (autonomous; gap_closure; UI-01, JOB-03)
-- [ ] 05-05-PLAN.md — Additive stage_changed(preparing) before _load_stt_adapter + indeterminate Preparing… state in ActiveJobCard until first progress event (autonomous; gap_closure; UI-01, INGEST-01)
+- [x] 05-05-PLAN.md — Additive stage_changed(preparing) before _load_stt_adapter + indeterminate Preparing… state in ActiveJobCard until first progress event (autonomous; gap_closure; UI-01, INGEST-01)
 
 ### Phase 6: YouTube Ingest + Sequential Playlist Queue
 
@@ -301,7 +301,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. GPU Backend Detection + Model Manager | 5/5 | Complete    | 2026-06-19 |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 3/3 | Complete    | 2026-06-22 |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 6/6 | Complete    | 2026-06-23 |
-| 5. Local File Ingest + History UI + 3-Pane Layout | 4/4 | Plans complete (verifier pending) |  |
+| 5. Local File Ingest + History UI + 3-Pane Layout | 6/6 | Complete   | 2026-06-26 |
 | 6. YouTube Ingest + Sequential Playlist Queue | 0/3 | Not started | - |
 | 7. Diarization Adapter + Speaker Rename Cluster | 0/3 | Not started | - |
 | 8. LLM Adapter + Four Summary Templates + Multi-Select | 0/3 | Not started | - |
