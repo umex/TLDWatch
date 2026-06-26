@@ -158,7 +158,7 @@ Plans:
   4. The currently active transcript line is highlighted based on scroll position so the user can locate context.
   5. The user can re-open a completed job, see its existing transcript, and re-export it.
 
-**Plans**: 8 plans (4 phase plans across 3 waves + 4 gap-closure plans closing UAT test 4 + test 5 findings)
+**Plans**: 9 plans (4 phase plans across 3 waves + 5 gap-closure plans closing UAT test 4 + test 5 + test 6 findings)
 
 Plans:
 
@@ -184,6 +184,10 @@ Plans:
 
 - [x] 05-06-PLAN.md — Snapshot-authoritative ActiveJobCard: treat snapshot status 'starting' as preparing + derive Transcribing label from progress flow (progressArrived) so a late-connecting card shows Preparing/Transcribing regardless of WS connect timing (autonomous; gap_closure; UI-01, INGEST-01)
 - [x] 05-07-PLAN.md — Populate duration_s on the done path: propagate chunker total_seconds through Transcript.duration_s + transcribed-transition ManifestPatch so completed jobs render MM:SS duration in HistoryRow, not --:-- (autonomous; gap_closure; UI-01, JOB-03)
+
+**Gap-closure wave 3** (closing UAT test-6 finding; FE-only, zero file overlap with prior waves)
+
+- [ ] 05-08-PLAN.md — FE-only snapshot-authoritative ActiveJobCard for the ingesting window: extend isPreparing to cover status==='ingesting' && !progressArrived (model-load) + isTranscribingActive to fire on status==='ingesting' && progressArrived + seed progressArrived from snapshot.percent + consume event.stage fallback so a late-connecting card shows Preparing/Transcribing regardless of WS connect timing (autonomous; gap_closure; UI-01, INGEST-01)
 
 ### Phase 6: YouTube Ingest + Sequential Playlist Queue
 
@@ -306,7 +310,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. GPU Backend Detection + Model Manager | 5/5 | Complete    | 2026-06-19 |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 3/3 | Complete    | 2026-06-22 |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 6/6 | Complete    | 2026-06-23 |
-| 5. Local File Ingest + History UI + 3-Pane Layout | 8/8 | Complete   | 2026-06-26 |
+| 5. Local File Ingest + History UI + 3-Pane Layout | 9/9 | Complete   | 2026-06-26 |
 | 6. YouTube Ingest + Sequential Playlist Queue | 0/3 | Not started | - |
 | 7. Diarization Adapter + Speaker Rename Cluster | 0/3 | Not started | - |
 | 8. LLM Adapter + Four Summary Templates + Multi-Select | 0/3 | Not started | - |
