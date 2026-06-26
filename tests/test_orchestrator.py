@@ -294,6 +294,167 @@ async def test_progress_snapshot_persisted(tmp_data_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase 5 plan 05-05 -- UAT test-4 gap B regression test (TDD RED-first).
+#
+# ``test_preparing_event_emitted_before_transcribing_on_production_path``
+# closes UAT test-4 gap B: between upload completion and the first chunk
+# progress callback the ActiveJobCard rendered "Transcribing... 0%" with a
+# 0% bar -- the user thought nothing was going on while the STT model
+# JIT-loaded. The fix emits an additive ``stage_changed(preparing)`` event
+# BEFORE ``_load_stt_adapter`` on the production path (adapter is None) and
+# moves ``stage_changed(transcribing)`` to AFTER the adapter loads. The
+# test path (caller-provided adapter) skips the preparing event entirely so
+# existing orchestrator tests that pass a FakeAdapter see the same event
+# stream as before.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_preparing_event_emitted_before_transcribing_on_production_path(
+    tmp_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """05-05 gap B: production path emits preparing -> transcribing (ordered).
+
+    With ``adapter=None`` (the production path) and ``_load_stt_adapter``
+    monkeypatched to return a FakeAdapter (so the test does not pull
+    faster_whisper), run_job must publish ``stage_changed(preparing)`` BEFORE
+    ``stage_changed(transcribing)``. The preparing event is WS-only -- the DB
+    stage/status do NOT change during preparing (no update_stage call), so
+    the row stays at whatever the pre-transcribe stage was (ingested).
+
+    The test path (caller-provided adapter) does NOT emit a preparing event;
+    the existing test_state_machine / test_restart_rejoin / etc. that pass an
+    adapter assert that contract by still passing unchanged.
+    """
+    import app.jobs.orchestrator as orch_mod
+
+    s = _settings(tmp_data_dir)
+    sf = await _session_factory(s)
+
+    async with sf() as session:
+        job = await create_job(session, s, source_type="local")
+        job_id = job.id
+        await ensure_job_dir(s, job_id)
+        src = job_dir(s, job_id) / "source.mp4"
+        src.write_bytes(b"\x00" * 16)
+        from app.jobs.manifest import read_manifest
+
+        m = await read_manifest(s, job_id)
+        m = m.model_copy(update={"source_path": str(src)})
+        await write_manifest(s, m)
+        from sqlalchemy import text
+
+        await session.execute(
+            text("UPDATE jobs SET source_path = :p WHERE id = :id"),
+            {"p": str(src), "id": job_id},
+        )
+        await session.commit()
+
+    # Monkeypatch the production STT loader so it returns a FakeAdapter
+    # without pulling faster_whisper. The lambda returns a coroutine
+    # (mirroring _async_return used by the 04-02 worker tests).
+    fake = FakeAdapter()
+    monkeypatch.setattr(
+        orch_mod, "_load_stt_adapter", lambda _settings: _async_return(fake)
+    )
+
+    bus = EventBus()
+    q = bus.subscribe(job_id)
+
+    # Production path: adapter=None triggers _load_stt_adapter.
+    await run_job(s, sf, job_id, bus=bus, adapter=None)
+
+    # Drain the bus and collect the event stream.
+    events: list[dict] = []
+    while True:
+        try:
+            events.append(q.get_nowait())
+        except asyncio.QueueEmpty:
+            break
+
+    # The first stage_changed event MUST be "preparing" (emitted before
+    # _load_stt_adapter on the production path). Before the 05-05 fix the
+    # first stage_changed was "transcribing" -- this assertion fails RED.
+    stage_changes = [
+        ev.get("stage") for ev in events if ev.get("type") == "stage_changed"
+    ]
+    assert "preparing" in stage_changes, (
+        f"production path must emit stage_changed(preparing) before "
+        f"_load_stt_adapter; stage_changes={stage_changes}"
+    )
+    # Ordering: preparing fires BEFORE transcribing.
+    prep_idx = stage_changes.index("preparing")
+    tr_idx = stage_changes.index("transcribing")
+    assert prep_idx < tr_idx, (
+        f"preparing must fire before transcribing; stage_changes={stage_changes}"
+    )
+
+    # run_job completed and the row is done.
+    async with sf() as session:
+        row = await get_job(session, job_id)
+    assert row is not None
+    assert row.status == "done"
+    assert transcript_path(s, job_id).exists()
+
+
+@pytest.mark.asyncio
+async def test_preparing_event_not_emitted_on_test_path(
+    tmp_data_dir: Path,
+) -> None:
+    """05-05 gap B: test path (caller adapter) does NOT emit preparing.
+
+    Existing orchestrator tests pass a FakeAdapter directly; the preparing
+    event is production-path-only (emitted inside the ``else`` branch of
+    ``if adapter is not None``). This test asserts that contract explicitly
+    so a future refactor cannot accidentally emit preparing on the test
+    path and break the existing tests' event-stream assumptions.
+    """
+    s = _settings(tmp_data_dir)
+    sf = await _session_factory(s)
+
+    async with sf() as session:
+        job = await create_job(session, s, source_type="local")
+        job_id = job.id
+        await ensure_job_dir(s, job_id)
+        src = job_dir(s, job_id) / "source.mp4"
+        src.write_bytes(b"\x00" * 16)
+        from app.jobs.manifest import read_manifest
+
+        m = await read_manifest(s, job_id)
+        m = m.model_copy(update={"source_path": str(src)})
+        await write_manifest(s, m)
+        from sqlalchemy import text
+
+        await session.execute(
+            text("UPDATE jobs SET source_path = :p WHERE id = :id"),
+            {"p": str(src), "id": job_id},
+        )
+        await session.commit()
+
+    bus = EventBus()
+    q = bus.subscribe(job_id)
+
+    # Test path: caller provides the adapter.
+    await run_job(s, sf, job_id, bus=bus, adapter=FakeAdapter())
+
+    events: list[dict] = []
+    while True:
+        try:
+            events.append(q.get_nowait())
+        except asyncio.QueueEmpty:
+            break
+
+    stage_changes = [
+        ev.get("stage") for ev in events if ev.get("type") == "stage_changed"
+    ]
+    assert "preparing" not in stage_changes, (
+        f"test path (caller adapter) must NOT emit preparing; "
+        f"stage_changes={stage_changes}"
+    )
+    assert "transcribing" in stage_changes
+
+
+# ---------------------------------------------------------------------------
 # Phase 4 plan 04-02 -- Wave 0 test scaffolding (TDD RED-first).
 #
 # The tests below cover the 04-02 surface: the SQLite-backed FIFO worker
