@@ -104,24 +104,41 @@ export default function ActiveJobCard({
     return () => clearTimeout(t)
   }, [fading, jobId, queryClient])
 
-  const isQueued =
-    status === "queued" ||
-    status === "uploading" ||
-    status === "starting"
+  const isQueued = status === "queued" || status === "uploading"
   const isIngesting = status === "ingesting"
   const isTranscribing = status === "transcribing"
   const isFailed = status === "failed"
   const isDone = status === "done"
   const isCancelled = status === "cancelled"
-  // 05-05 gap B: covers BOTH the BE-emitted preparing stage (model load
-  // window) AND the transcribing-before-first-progress window (first-chunk
-  // wait after the model loads). Once progressArrived is set the card
-  // switches to the determinate Transcribing... X% bar and never reverts.
+  // 05-06 race branch b: a late-connecting card that missed
+  // stage_changed(transcribing) but is receiving progress events is
+  // effectively transcribing. progressArrived is the authoritative signal
+  // (progress events are flowing) -- status may still be "starting" (the
+  // WS-only preparing invariant means preparing is never persisted to DB,
+  // so the snapshot carries status:"starting" through the model-load window
+  // AND the first-chunk wait). Gated by !isQueued/!isIngesting/!terminal so
+  // it never fires for queued/ingesting/terminal cards.
+  const isTranscribingActive =
+    progressArrived.current &&
+    !isQueued &&
+    !isIngesting &&
+    !isDone &&
+    !isFailed &&
+    !isCancelled
+  // 05-05 gap B + 05-06 race branch a: covers the BE-emitted preparing
+  // stage (model load window), the transcribing-before-first-progress
+  // window, AND the late-connecting card (snapshot status:"starting",
+  // missed stage_changed(preparing)). Gated by !isTranscribingActive so
+  // once progress events flow the card switches to the Transcribing label
+  // even if status is still "starting" (race branch b).
   const isPreparing =
-    status === "preparing" ||
-    (isTranscribing && !progressArrived.current)
-  const showBar = isIngesting || isTranscribing || isPreparing
-  const showIndeterminateBar = isPreparing && !isIngesting
+    (status === "preparing" ||
+      status === "starting" ||
+      (isTranscribing && !progressArrived.current)) &&
+    !isTranscribingActive
+  const showBar = isIngesting || isTranscribing || isPreparing || isTranscribingActive
+  const showIndeterminateBar =
+    isPreparing && !isIngesting && !progressArrived.current
   const etaLabel =
     eta !== null && chunks >= 2 ? ` (ETA: ${formatEta(eta)})` : ""
 
@@ -153,7 +170,7 @@ export default function ActiveJobCard({
         {isQueued && <span>In Queue</span>}
         {isIngesting && <span>Ingesting File... {percent}%</span>}
         {isPreparing && <span>Preparing...</span>}
-        {isTranscribing && progressArrived.current && (
+        {isTranscribingActive && (
           <span>
             Transcribing... {percent}%{etaLabel}
           </span>
