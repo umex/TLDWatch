@@ -234,18 +234,33 @@ async def run_job(
             manifest = await read_manifest(settings, job_id)
 
         # --- Transcribing stage ---
+        # 05-05 gap B: emit an additive ``stage_changed(preparing)`` event
+        # BEFORE ``_load_stt_adapter`` on the PRODUCTION path only (adapter
+        # is None). The FE ActiveJobCard shows an indeterminate "Preparing..."
+        # state during the JIT model load + first-chunk wait so the user does
+        # not see a stalled "Transcribing... 0%" bar. ``stage_changed
+        # (transcribing)`` moves to AFTER the adapter resolves so the FE
+        # determinate bar only appears once the model is ready. The test
+        # path (caller-provided adapter) skips the preparing event entirely
+        # -- existing orchestrator tests see the same transcribing event as
+        # before. ``preparing`` is WS-only: it is NOT written to the DB
+        # (no update_stage call) and is NOT added to StageNameLiteral -- the
+        # DB stage stays at whatever the pre-transcribe stage was (e.g.
+        # "ingested", status "ingesting"), so stage_to_status and the
+        # manifest-DB projection invariant are untouched.
         if not skip_transcribed:
-            _publish({"type": "stage_changed", "stage": "transcribing"})
-
             # Resolve / load the STT adapter (JIT at stage start, D-02).
             stt_adapter: STTAdapter
             if adapter is not None:
                 # Test path: caller-provided fake / pre-loaded adapter.
                 stt_adapter = adapter
             else:
-                # Production path: mirror app/cli/transcribe.py.
+                # Production path: mirror app/cli/transcribe.py. Emit the
+                # preparing event BEFORE the (potentially slow) model load.
+                _publish({"type": "stage_changed", "stage": "preparing"})
                 stt_adapter = await _load_stt_adapter(settings)
                 loaded_by_run = True
+            _publish({"type": "stage_changed", "stage": "transcribing"})
 
             # Run transcribe off-loop (Fix 3 -- functools.partial wraps
             # the kwargs run_in_executor cannot take directly).
