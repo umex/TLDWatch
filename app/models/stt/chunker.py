@@ -161,6 +161,7 @@ def transcribe_file(
             job_id=job_id,
             language=result.language if language is None else language,
             segments=segments,
+            duration_s=total_seconds,
         )
 
     # 3. Chunked path: >30 min -> windowed chunks + overlap-dedupe stitch.
@@ -249,7 +250,7 @@ def transcribe_file(
         len(merged),
         lang,
     )
-    return Transcript(job_id=job_id, language=lang, segments=merged)
+    return Transcript(job_id=job_id, language=lang, segments=merged, duration_s=total_seconds)
 
 
 def _transcribe_chunk_oom_safe(

@@ -40,6 +40,14 @@ class Transcript(BaseModel):
     schema_version: int = 1
     job_id: str
     language: str | None = None
+    # 05-07: source MEDIA duration in seconds (chunker total_seconds =
+    # len(audio)/SAMPLE_RATE). Additive, optional, default None so
+    # existing transcript.json files load without failing (the model is
+    # lax for output / internal storage per the module docstring). This
+    # is the same semantic as the failed-jobs 00:42 the user observed --
+    # the field is colocated with source_sha256/source_path (media
+    # metadata), NOT wall-clock processing time.
+    duration_s: float | None = None
     segments: list[TranscriptSegment] = Field(default_factory=list)
 
 

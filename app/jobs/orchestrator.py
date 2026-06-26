@@ -290,7 +290,10 @@ async def run_job(
             async with session_factory() as session:
                 await update_stage(
                     settings, session, job_id, "transcribed",
-                    ManifestPatch(language=transcript.language),
+                    ManifestPatch(
+                        language=transcript.language,
+                        duration_s=transcript.duration_s,
+                    ),
                 )
             async with session_factory() as session:
                 await update_stage(settings, session, job_id, "done")
