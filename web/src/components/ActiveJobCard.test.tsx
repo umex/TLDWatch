@@ -50,7 +50,7 @@ function fire(data: unknown) {
   })
 }
 
-describe("ActiveJobCard preparing state (plans 05-05 + 05-06)", () => {
+describe("ActiveJobCard preparing state (plans 05-05 + 05-06 + 05-08)", () => {
   it("shows Preparing... on stage_changed(preparing)", async () => {
     const { getByText, queryByText, getByTestId, container } = renderCard()
     await waitForSocket()
@@ -246,6 +246,96 @@ describe("ActiveJobCard preparing state (plans 05-05 + 05-06)", () => {
     )
     expect(queryByText(/In Queue/)).toBeNull()
     expect(queryByText("Preparing...")).toBeNull()
+    const determinate = container.querySelector('.fill[style*="width"]')
+    expect(determinate).toBeTruthy()
+  })
+
+  it("shows Preparing... + indeterminate bar when snapshot status is ingesting and no stage_changed fires (05-08 race branch a)", async () => {
+    const { getByText, queryByText, getByTestId, container } = renderCard()
+    await waitForSocket()
+    // Late-connecting card: snapshot status "ingesting" (DB status for the
+    // ENTIRE model-load + transcribe window -- the WS-only
+    // stage_changed(preparing|transcribing) events at orchestrator.py:260/:263
+    // are NOT persisted, so the snapshot status never becomes "preparing" /
+    // "transcribing"). The card missed both stage_changed events.
+    fire({
+      type: "snapshot",
+      job_id: "job-1",
+      stage: null,
+      percent: 0,
+      eta: null,
+      status: "ingesting",
+    })
+
+    expect(getByText("Preparing...")).toBeTruthy()
+    expect(queryByText(/In Queue/)).toBeNull()
+    expect(queryByText(/Ingesting File/)).toBeNull()
+    expect(getByTestId("active-job-card").getAttribute("data-preparing")).toBe(
+      "true",
+    )
+    const indeterminate = container.querySelector(".fill.indeterminate")
+    expect(indeterminate).toBeTruthy()
+    const determinate = container.querySelector('.fill[style*="width"]')
+    expect(determinate).toBeNull()
+  })
+
+  it("shows Transcribing...X% determinate bar when snapshot is ingesting and a progress event arrives with no stage_changed(transcribing) (05-08 race branch b)", async () => {
+    const { getByText, queryByText, getByTestId, container } = renderCard()
+    await waitForSocket()
+    // Late-connecting card: snapshot status "ingesting", then a progress event
+    // arrives (the card missed BOTH stage_changed(preparing) AND
+    // stage_changed(transcribing) -- simulates the DropZone race where
+    // onJobCreated fires only when upload.status==="done").
+    fire({
+      type: "snapshot",
+      job_id: "job-1",
+      stage: null,
+      percent: 0,
+      eta: null,
+      status: "ingesting",
+    })
+    fire({
+      type: "progress",
+      chunks_done: 2,
+      chunks_total: 5,
+      percent: 45,
+      eta_s: 60,
+      chunk_start_s: 0,
+    })
+
+    expect(getByText(/Transcribing\.\.\. 45%/)).toBeTruthy()
+    expect(getByTestId("active-job-card").getAttribute("data-preparing")).toBe(
+      "false",
+    )
+    expect(queryByText(/In Queue/)).toBeNull()
+    expect(queryByText("Preparing...")).toBeNull()
+    expect(queryByText(/Ingesting File/)).toBeNull()
+    const determinate = container.querySelector('.fill[style*="width"]')
+    expect(determinate).toBeTruthy()
+  })
+
+  it("shows Transcribing...X% determinate bar from snapshot alone when reconnecting mid-transcription (05-08 race branch c)", async () => {
+    const { getByText, queryByText, getByTestId, container } = renderCard()
+    await waitForSocket()
+    // Card reconnecting mid-transcription: the snapshot already carries
+    // percent:45 from progress.json. No further events. progressArrived is
+    // seeded from snapshot.percent so the determinate bar renders immediately.
+    fire({
+      type: "snapshot",
+      job_id: "job-1",
+      stage: null,
+      percent: 45,
+      eta: null,
+      status: "ingesting",
+    })
+
+    expect(getByText(/Transcribing\.\.\. 45%/)).toBeTruthy()
+    expect(getByTestId("active-job-card").getAttribute("data-preparing")).toBe(
+      "false",
+    )
+    expect(queryByText(/In Queue/)).toBeNull()
+    expect(queryByText("Preparing...")).toBeNull()
+    expect(queryByText(/Ingesting File/)).toBeNull()
     const determinate = container.querySelector('.fill[style*="width"]')
     expect(determinate).toBeTruthy()
   })
