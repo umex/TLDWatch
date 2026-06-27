@@ -61,6 +61,21 @@ export default function ActiveJobCard({
         setStatus(event.status)
         setPercent(event.percent ?? 0)
         setEta(event.eta ?? null)
+        // 05-08: a reconnecting card's snapshot carries the live DB status
+        // ("ingesting" for the entire model-load + transcribe window -- the
+        // WS-only stage_changed(preparing|transcribing) events at orchestrator
+        // .py:260/:263 are NOT persisted, so the snapshot status never becomes
+        // "preparing" or "transcribing"). Seed progressArrived from snapshot
+        // .percent so a card reconnecting mid-transcription drives the
+        // determinate bar immediately. event.stage is a fallback: "transcribed"
+        // /"done" means the transcript is already on disk.
+        if (
+          (event.percent ?? 0) > 0 ||
+          event.stage === "transcribed" ||
+          event.stage === "done"
+        ) {
+          progressArrived.current = true
+        }
         break
       case "stage_changed":
         setStatus(event.stage)
@@ -121,7 +136,6 @@ export default function ActiveJobCard({
   const isTranscribingActive =
     progressArrived.current &&
     !isQueued &&
-    !isIngesting &&
     !isDone &&
     !isFailed &&
     !isCancelled
@@ -134,11 +148,11 @@ export default function ActiveJobCard({
   const isPreparing =
     (status === "preparing" ||
       status === "starting" ||
+      status === "ingesting" ||
       (isTranscribing && !progressArrived.current)) &&
     !isTranscribingActive
   const showBar = isIngesting || isTranscribing || isPreparing || isTranscribingActive
-  const showIndeterminateBar =
-    isPreparing && !isIngesting && !progressArrived.current
+  const showIndeterminateBar = isPreparing && !progressArrived.current
   const etaLabel =
     eta !== null && chunks >= 2 ? ` (ETA: ${formatEta(eta)})` : ""
 
@@ -168,12 +182,14 @@ export default function ActiveJobCard({
       >
         <span className="badge badge-queued">{jobId.slice(0, 8)}</span>
         {isQueued && <span>In Queue</span>}
-        {isIngesting && <span>Ingesting File... {percent}%</span>}
         {isPreparing && <span>Preparing...</span>}
         {isTranscribingActive && (
           <span>
             Transcribing... {percent}%{etaLabel}
           </span>
+        )}
+        {isIngesting && !isPreparing && !isTranscribingActive && (
+          <span>Ingesting File... {percent}%</span>
         )}
         {isFailed && (
           <span style={{ color: "var(--destructive)" }}>
