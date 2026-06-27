@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-06-27T23:08:29.985Z",
+  "phase": "05",
+  "phase_name": "local-file-ingest-history-ui-3-pane-layout",
+  "phase_dir": ".planning/phases/05-local-file-ingest-history-ui-3-pane-layout",
+  "plan": "05-08",
+  "task": 1,
+  "total_tasks": 1,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": 1, "name": "05-08 ActiveJobCard snapshot-authoritative ingesting-window fix", "status": "done", "commit": "0e86ea3", "note": "RED d12aa74 + GREEN 0e86ea3 + docs abc8127. Code complete: 23/23 must-haves, 35 FE + 283 BE green. FE-only."},
+    {"id": 2, "name": "code review 05-08", "status": "done", "commit": "f50b681", "note": "05-REVIEW.md: 0 Critical, 2 Warning (stale comments), 3 Info. No correctness/security defects."},
+    {"id": 3, "name": "re-verify phase 05 after 05-08", "status": "done", "commit": "e853fbc", "note": "05-VERIFICATION.md status: human_needed, score 23/23. One human_verification item: live re-test of tests 4/5/6 against fresh servers."},
+    {"id": 4, "name": "reset BE + FE servers; live UAT re-test of test 6", "status": "done", "commit": "f1e84e4", "note": "Fresh BE (becbwpap4 :8000) + Vite (b0ncyirc9 :5173) on current HEAD. Re-test FAILED: 'after upload something shows up but it is too quick to read. No Transcribing.' Recorded in 05-UAT.md test 6 + new Gap entry with 3 hypotheses (H1/H2/H3)."}
+  ],
+  "remaining_tasks": [
+    {"id": 5, "name": "diagnose H1 vs H2 vs H3 with LIVE evidence (longer clip + browser WS frame log + BE stage_changed/progress log for the specific job)", "status": "not_started"},
+    {"id": 6, "name": "plan gap closure (new plan, e.g. 05-09) from the recorded UAT gap via /gsd-plan-phase 5 --gaps", "status": "not_started"},
+    {"id": 7, "name": "execute the gap-closure plan via /gsd-execute-phase 5 --gaps-only", "status": "not_started"},
+    {"id": 8, "name": "re-verify live (UAT test 6 must pass against fresh servers with a longer clip)", "status": "not_started"}
+  ],
+  "blockers": [
+    {"description": "Live UAT test 6 still fails after 05-08: active card flashes too briefly, no 'Transcribing...' label. 05-04 filename + 05-07 duration ARE confirmed live on new jobs (test4.mp4: dur=136.7, orig=test4.mp4); only active-card Preparing/Transcribing feedback fails.", "type": "technical", "workaround": "none yet — needs live diagnosis to distinguish H1 (warm-model+short-clip timing) / H2 (progress WS events not reaching card live) / H3 (snapshot status='starting'+percent:0, 05-08 premise false for part of the window)."}
+  ],
+  "human_actions_pending": [
+    {"action": "Drop a LONGER clip (cold + warm model) against the fresh servers and capture: (a) browser dev-tools WS frame log for /ws/jobs/{id}/events, (b) backend log of stage_changed(preparing|transcribing) + progress emits for that job id, (c) the exact snapshot status/percent sequence the card receives.", "context": "A short warm clip is the worst case for observing feedback and hid the bug through three code-correct gap closures. Live evidence is required to distinguish H1/H2/H3 before any more code is written.", "blocking": true}
+  ],
+  "decisions": [
+    {"decision": "Executed 05-08 as FE-only (Option A) — reinterpret already-trusted snapshot fields (status+percent+stage) for the ingesting window.", "rationale": "Mirrors 05-06 style; preserves 05-04 H3+H4 + 05-05 WS-only invariants. Option B (BE-persisted transient status) rejected as heavier/riskier.", "phase": "05"},
+    {"decision": "Ran the gap-closure executor in SEQUENTIAL mode on the main tree (not worktree-isolated).", "rationale": "web/node_modules is gitignored — a fresh worktree would lack it and break vitest/tsc/build. Single-plan wave, no parallelism benefit.", "phase": "05"},
+    {"decision": "Did NOT auto-advance phase 05 to complete despite ROADMAP [x].", "rationale": "verify-work returned human_needed; live UAT test 6 fails. Phase completion must wait for the live re-test to pass.", "phase": "05"}
+  ],
+  "uncommitted_files": [".planning/STATE.md (modified by state.begin-phase at execute-phase start; fold into WIP commit)"],
+  "next_action": "Resume by gathering LIVE evidence for the active-card feedback failure: with the fresh servers (still running), have the user drop a LONGER clip and capture the browser WS frame log + the BE stage_changed/progress log for that job id. Use that to distinguish H1 (timing) vs H2 (progress not reaching card) vs H3 (snapshot status='starting' mismatch). Then /gsd-plan-phase 5 --gaps to create the next gap-closure plan, /gsd-execute-phase 5 --gaps-only to execute, and re-run /gsd-verify-work 5 live.",
+  "context_notes": "Three successive gap closures (05-05, 05-06, 05-08) each passed all code-level/jsdom tests + goal-backward verification (23/23) yet the live human UAT symptom recurred. The root methodological failure: jsdom + grep guards + BE/FE unit green do NOT catch the live WS-connect-timing / perceptual-feedback bug, and 05-08 codified a runtime-status premise (DB='ingesting' for the whole window) from code-reading without live confirmation — the live job was observed in status='starting'. The next plan MUST require live evidence before code and must not declare the gap closed on jsdom+grep alone. See .continue-here.md BLOCKING CONSTRAINTS."
+}
