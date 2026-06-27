@@ -158,7 +158,7 @@ Plans:
   4. The currently active transcript line is highlighted based on scroll position so the user can locate context.
   5. The user can re-open a completed job, see its existing transcript, and re-export it.
 
-**Plans**: 9 plans (4 phase plans across 3 waves + 5 gap-closure plans closing UAT test 4 + test 5 + test 6 findings)
+**Plans**: 10 plans (4 phase plans across 3 waves + 6 gap-closure plans closing UAT test 4 + test 5 + test 6 findings)
 
 Plans:
 
@@ -188,6 +188,10 @@ Plans:
 **Gap-closure wave 3** (closing UAT test-6 finding; FE-only, zero file overlap with prior waves)
 
 - [x] 05-08-PLAN.md — FE-only snapshot-authoritative ActiveJobCard for the ingesting window: extend isPreparing to cover status==='ingesting' && !progressArrived (model-load) + isTranscribingActive to fire on status==='ingesting' && progressArrived + seed progressArrived from snapshot.percent + consume event.stage fallback so a late-connecting card shows Preparing/Transcribing regardless of WS connect timing (autonomous; gap_closure; UI-01, INGEST-01)
+
+**Gap-closure wave 4** (closing the persistent UAT test-6 live symptom after three code-correct closures 05-05/05-06/05-08 recurred; live-evidence-first per .continue-here.md BLOCKING CONSTRAINTS)
+
+- [ ] 05-09-PLAN.md — Live-evidence-first gap closure: Task 1 captures browser WS frame log + BE stage_changed/progress log for a specific job id (longer/cold clip) to distinguish H1 timing / H2 progress-not-reaching-card / H3 snapshot status='starting' mismatch BEFORE any code; Task 2 applies the hypothesis-conditional fix (H1 min-display-duration / H2 WS-delivery / H3 starting-snapshot-authoritative, or BE Option B only if evidence demands); Task 3 live UAT re-test against fresh servers with a longer clip is the gap gate (autonomous=false; gap_closure; UI-01, INGEST-01)
 
 ### Phase 6: YouTube Ingest + Sequential Playlist Queue
 
