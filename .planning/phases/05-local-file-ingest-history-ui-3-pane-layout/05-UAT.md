@@ -1,14 +1,29 @@
 ---
-status: diagnosed
+status: testing
 phase: 05-local-file-ingest-history-ui-3-pane-layout
 source: [05-VERIFICATION.md]
 started: 2026-06-25T04:23:43Z
-updated: 2026-06-26T17:30:00Z
+updated: 2026-06-27T20:30:00Z
 ---
 
 ## Current Test
 
-[testing complete -- test 6 issue: 05-06 race fix did not resolve live "nothing" symptom; diagnosing]
+number: 6
+name: Gap-closure re-test (05-06 + 05-07 + 05-08) against FRESH servers
+expected: |
+  All code gaps are now CLOSED (05-04 filename, 05-05 preparing event, 05-06 starting-window
+  race, 05-07 duration_s, 05-08 ingesting-window race -- 23/23 must-haves verified in
+  05-VERIFICATION.md, 35 FE + 283 BE tests green). The remaining step is the OPERATIONAL
+  live re-test: stop any stale back-end / Vite processes; restart both on current HEAD
+  (includes 05-08's snapshot-authoritative ingesting-window fix); hard-reload the browser;
+  drop a SHORT named clip. After upload completes the active card shows "Preparing..." +
+  indeterminate moving-stripe bar (NOT "Ingesting File... 0%" / NOT "In Queue" / NOT silence)
+  even when the WS connects after stage_changed(preparing|transcribing) were emitted; on
+  first chunk progress it switches to "Transcribing... X%" determinate bar (no revert); on
+  browser refresh mid-transcription it reconnects to "Transcribing... X%" from snapshot.percent
+  alone; on completion the card fades and the history row shows the DROPPED FILENAME + MM:SS
+  duration; click the row loads transcript + summary panes with no embedded video player.
+awaiting: user response (run /gsd-verify-work 05)
 
 ## Tests
 
@@ -129,6 +144,18 @@ result: issue
 reported: "after upload there was nothing untill video was transcribed and appeared in the history row."
 severity: major
 note: |
+  CODE GAP CLOSED 2026-06-27 by 05-08 (gap-closure plan, executed): 05-06's race fix was
+  built on a FALSE premise -- it assumed the late-connect snapshot carries status:"starting"
+  during model-load. The live DB status for the ENTIRE model-load + transcribe window is
+  "ingesting" (never "starting"/"transcribing"; the WS-only stage_changed(preparing|transcribing)
+  events are NOT persisted). 05-08 makes ActiveJobCard snapshot-authoritative for the
+  "ingesting" window: isPreparing covers status==='ingesting' && !progressArrived (model-load),
+  isTranscribingActive fires on status==='ingesting' && progressArrived, the snapshot handler
+  seeds progressArrived from snapshot.percent + event.stage fallback. 3 new race-branch tests
+  (a/b/c) PASS; 10/10 ActiveJobCard tests + 35 FE + 283 BE green; 23/23 must-haves verified.
+  The historical diagnosis below is retained for the record; the live re-test above (Current
+  Test) is the final operational confirmation against fresh servers.
+
   The 05-06 snapshot-authoritative FE fix did NOT resolve the live symptom. After upload
   completes the user sees NOTHING (no "Preparing..." card, no "Transcribing... X%" bar) until the
   job finishes and pops into the history list. This is the SAME "nothing is going on then
