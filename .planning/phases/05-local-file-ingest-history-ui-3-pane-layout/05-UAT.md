@@ -3,7 +3,7 @@ status: testing
 phase: 05-local-file-ingest-history-ui-3-pane-layout
 source: [05-VERIFICATION.md]
 started: 2026-06-25T04:23:43Z
-updated: 2026-06-27T20:30:00Z
+updated: 2026-06-27T20:45:00Z
 ---
 
 ## Current Test
@@ -155,6 +155,45 @@ note: |
   (a/b/c) PASS; 10/10 ActiveJobCard tests + 35 FE + 283 BE green; 23/23 must-haves verified.
   The historical diagnosis below is retained for the record; the live re-test above (Current
   Test) is the final operational confirmation against fresh servers.
+
+  RE-TEST 2026-06-27T20:40Z (fresh BE PID becbwpap4 + fresh Vite b0ncyirc9 on current HEAD
+  e853fbc, both restarted by the orchestrator; browser hard-reloaded): STILL FAILS. User
+  reported "its still the same issue. after upload something shows up but it is too quick
+  to read. There is no 'Transcribing ...'". So 05-08's FE label/bar derivation did NOT
+  resolve the live symptom either. Live evidence gathered by the orchestrator:
+  - 05-04 + 05-07 ARE confirmed live on NEW jobs: the most recent done job (test4.mp4,
+    id f7df9c5a) has duration_s=136.719125 (MM:SS renders) AND original_filename=test4.mp4
+    (dropped filename, not source.mp4). So the filename + duration gaps are CLOSED live;
+    the REMAINING failure is purely the active-card Preparing/Transcribing feedback.
+  - The just-dropped active job (90289191) was observed via GET /jobs in status="starting",
+    current_stage=None, percent=None -- i.e. the live DB status during the active window
+    is "starting", NOT "ingesting" as 05-08's premise asserted. This means 05-08's central
+    premise ("DB status is 'ingesting' for the ENTIRE model-load + transcribe window") is
+    FALSE in the live runtime for at least part of the window; the 'starting' branch
+    (retained from 05-06) is the one actually hit, not the new 'ingesting' branch.
+  - HistoryPage.tsx confirms the card does NOT unmount during transcription:
+    handleJobCreated adds the jobId on upload-done and the card only removes itself via
+    onTerminal (a terminal WS event). So the "card unmounts after upload" hypothesis (2)
+    from the prior note is REFUTED -- the card is sustained until terminal.
+  Leading refined hypotheses for the persistent "too quick / no Transcribing" symptom:
+    (H1) TIMING/WINDOW: with a WARM model (test4.mp4 just ran 136s of transcription, so the
+         STT model is resident) and a SHORT clip, the job races from starting -> ingesting
+         -> done in a second or two; the card's WS connects, gets a snapshot already at or
+         near terminal, shows Preparing for an instant then Done+fades before any progress
+         event can drive the Transcribing label. The "something too quick to read" is the
+         Preparing flash; "no Transcribing" is the absent/skipped progress window.
+    (H2) PROGRESS NOT REACHING THE CARD LIVE: the progress WS events (orchestrator.py:282+
+         chunk callbacks) may not be delivered/processed by the card's WS handler in the
+         short window, so progressArrived.current never sticks live even though it does in
+         jsdom -> isTranscribingActive stays false -> no "Transcribing..." label.
+    (H3) SNAPSHOT STATUS MISMATCH: 05-08 seeds progressArrived from snapshot.percent>0, but
+         if the live snapshot during the short window carries status:"starting" + percent:0
+         (model-load not yet 'ingested'), isPreparing fires (Preparing...) and the card
+         never reaches the isTranscribingActive path before terminal.
+  Diagnosis must distinguish H1 vs H2 vs H3 with a LONGER clip (cold or warm) + the browser
+  dev-tools WS frame log + the BE log of stage_changed/progress emits for the specific job.
+  A short warm clip is the worst case for observing feedback; re-test with a longer clip
+  and capture the WS message timeline.
 
   The 05-06 snapshot-authoritative FE fix did NOT resolve the live symptom. After upload
   completes the user sees NOTHING (no "Preparing..." card, no "Transcribing... X%" bar) until the
@@ -386,3 +425,26 @@ The post-gap-closure code review found 0 critical / 3 warnings / 4 info. The 3 w
 progress signal); they do not block any phase must-have or success criterion and are
 appropriate for a future polish pass. The 4 info findings are minor cleanup. See
 05-REVIEW.md for full detail; `/gsd-code-review 05 --fix` to auto-apply if desired.
+- truth: "After upload completes the active card shows Preparing... + indeterminate bar, then Transcribing... X% on first progress, SUSTAINED until terminal (not a sub-second flash with no Transcribing label)"
+  status: failed
+  reason: "User reported (2026-06-27 fresh-server re-test, post-05-08): 'its still the same issue. after upload something shows up but it is too quick to read. There is no Transcribing ...' 05-08's FE label/bar derivation did NOT resolve the live symptom. 05-04 filename + 05-07 duration ARE confirmed live on new jobs (test4.mp4 f7df9c5a: duration_s=136.719125, original_filename=test4.mp4); ONLY the active-card Preparing/Transcribing feedback fails."
+  severity: major
+  test: 6
+  evidence:
+    - "Live GET /jobs showed the just-dropped active job (90289191) in status='starting', current_stage=None, percent=None -- 05-08's premise that the DB status is 'ingesting' for the ENTIRE model-load+transcribe window is FALSE for at least part of the window; the 05-06-retained 'starting' branch is the one actually hit, not 05-08's new 'ingesting' branch."
+    - "HistoryPage.tsx: handleJobCreated adds jobId on upload-done; card removes itself ONLY via onTerminal. The card does NOT unmount during transcription -- REFUTES the 'card unmounts after upload' hypothesis."
+    - "Warm model (test4.mp4 just ran 136s) + short clip -> job finishes in ~1-2s; the card's WS likely connects at/near terminal so Preparing flashes + Done fades before any progress event drives the Transcribing label."
+  hypotheses:
+    - "H1 TIMING/WINDOW: warm model + short clip -> starting->ingesting->done in seconds; snapshot already near terminal -> Preparing flash then Done+fade, no Transcribing window."
+    - "H2 PROGRESS NOT REACHING CARD LIVE: progress WS events (orchestrator.py chunk callbacks) not delivered/processed in the short window -> progressArrived.current never sticks live -> isTranscribingActive stays false (passes in jsdom, fails live)."
+    - "H3 SNAPSHOT STATUS MISMATCH: live snapshot carries status:'starting'+percent:0 (pre-'ingested') -> isPreparing fires and the card never reaches isTranscribingActive before terminal."
+  artifacts:
+    - path: "web/src/components/ActiveJobCard.tsx"
+      issue: "05-08 ingesting-window derivation does not cover the live 'starting' window timing; isTranscribingActive may never fire live for fast warm-model jobs"
+    - path: "web/src/pages/HistoryPage.tsx"
+      issue: "card lifecycle OK (persists until terminal) but the feedback window for fast jobs is too short to render Transcribing"
+    - path: "app/jobs/orchestrator.py"
+      issue: "verify stage_changed(preparing|transcribing)+progress emits actually fire and reach the WS for short warm-model jobs"
+  missing:
+    - "Re-test with a LONGER clip (cold + warm) + capture browser dev-tools WS frame log + BE log of stage_changed/progress for the specific job to distinguish H1 vs H2 vs H3"
+    - "Fix active-card feedback so Transcribing... X% is visible for fast jobs (min display duration / ensure progress drives the label before terminal / post-terminal Transcribed state instead of instant fade)"
