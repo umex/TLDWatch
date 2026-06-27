@@ -187,7 +187,7 @@ Plans:
 
 **Gap-closure wave 3** (closing UAT test-6 finding; FE-only, zero file overlap with prior waves)
 
-- [ ] 05-08-PLAN.md — FE-only snapshot-authoritative ActiveJobCard for the ingesting window: extend isPreparing to cover status==='ingesting' && !progressArrived (model-load) + isTranscribingActive to fire on status==='ingesting' && progressArrived + seed progressArrived from snapshot.percent + consume event.stage fallback so a late-connecting card shows Preparing/Transcribing regardless of WS connect timing (autonomous; gap_closure; UI-01, INGEST-01)
+- [x] 05-08-PLAN.md — FE-only snapshot-authoritative ActiveJobCard for the ingesting window: extend isPreparing to cover status==='ingesting' && !progressArrived (model-load) + isTranscribingActive to fire on status==='ingesting' && progressArrived + seed progressArrived from snapshot.percent + consume event.stage fallback so a late-connecting card shows Preparing/Transcribing regardless of WS connect timing (autonomous; gap_closure; UI-01, INGEST-01)
 
 ### Phase 6: YouTube Ingest + Sequential Playlist Queue
 
@@ -310,7 +310,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. GPU Backend Detection + Model Manager | 5/5 | Complete    | 2026-06-19 |
 | 3. STT Adapter + Audio Chunker + Standalone CLI | 3/3 | Complete    | 2026-06-22 |
 | 4. Job Orchestrator + Persistent Queue + WebSocket Progress | 6/6 | Complete    | 2026-06-23 |
-| 5. Local File Ingest + History UI + 3-Pane Layout | 9/9 | Complete   | 2026-06-26 |
+| 5. Local File Ingest + History UI + 3-Pane Layout | 9/9 | Complete   | 2026-06-27 |
 | 6. YouTube Ingest + Sequential Playlist Queue | 0/3 | Not started | - |
 | 7. Diarization Adapter + Speaker Rename Cluster | 0/3 | Not started | - |
 | 8. LLM Adapter + Four Summary Templates + Multi-Select | 0/3 | Not started | - |
